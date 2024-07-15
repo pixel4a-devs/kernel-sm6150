@@ -3,6 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufs.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
+ # Copyright (c) 2017-2018 Samsung Electronics Co., Ltd.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -37,6 +38,7 @@
 #define _UFS_H
 
 #include <linux/mutex.h>
+#include <linux/ktime.h>
 #include <linux/types.h>
 #include <scsi/ufs/ufs.h>
 
@@ -141,6 +143,8 @@ enum {
 	UPIU_QUERY_FUNC_STANDARD_WRITE_REQUEST          = 0x81,
 };
 
+#define UFSHCD_DEFAULT_PE_CYCLE		3000
+
 enum desc_header_offset {
 	QUERY_DESC_LENGTH_OFFSET	= 0x00,
 	QUERY_DESC_DESC_TYPE_OFFSET	= 0x01,
@@ -151,9 +155,20 @@ enum ufs_desc_def_size {
 	QUERY_DESC_CONFIGURATION_DEF_SIZE	= 0x90,
 	QUERY_DESC_UNIT_DEF_SIZE		= 0x23,
 	QUERY_DESC_INTERCONNECT_DEF_SIZE	= 0x06,
-	QUERY_DESC_GEOMETRY_DEF_SIZE		= 0x48,
+	QUERY_DESC_GEOMETRY_DEF_SIZE		= 0x44,
 	QUERY_DESC_POWER_DEF_SIZE		= 0x62,
 	QUERY_DESC_HEALTH_DEF_SIZE		= 0x25,
+};
+
+enum ufs_health_offset {
+	UFSHCD_HEALTH_LEN_OFFSET	= 0x0,
+	UFSHCD_HEALTH_TYPE_OFFSET	= 0x1,
+	UFSHCD_HEALTH_EOL_OFFSET	= 0x2,
+	UFSHCD_HEALTH_LIFEA_OFFSET	= 0x3,
+	UFSHCD_HEALTH_LIFEB_OFFSET	= 0x4,
+	UFSHCD_HEALTH_ERASE_OFFSET	= 0x0D,
+	UFSHCD_HEALTH_WRITE_OFFSET	= 0x15,
+	UFSHCD_HEALTH_LIFEC_OFFSET	= 0x24,
 };
 
 /* Unit descriptor parameters offsets in bytes*/
@@ -205,15 +220,14 @@ enum device_desc_param {
 	DEVICE_DESC_PARAM_UD_LEN		= 0x1B,
 	DEVICE_DESC_PARAM_RTT_CAP		= 0x1C,
 	DEVICE_DESC_PARAM_FRQ_RTC		= 0x1D,
-};
-
-/* Health descriptor parameters offsets in bytes*/
-enum health_desc_param {
-	HEALTH_DESC_PARAM_LEN			= 0x0,
-	HEALTH_DESC_PARAM_TYPE			= 0x1,
-	HEALTH_DESC_PARAM_EOL_INFO		= 0x2,
-	HEALTH_DESC_PARAM_LIFE_TIME_EST_A	= 0x3,
-	HEALTH_DESC_PARAM_LIFE_TIME_EST_B	= 0x4,
+	DEVICE_DESC_PARAM_UFS_FEAT		= 0x1F,
+	DEVICE_DESC_PARAM_FFU_TMT		= 0x20,
+	DEVICE_DESC_PARAM_Q_DPTH		= 0x21,
+	DEVICE_DESC_PARAM_DEV_VER		= 0x22,
+	DEVICE_DESC_PARAM_NUM_SEC_WPA		= 0x24,
+	DEVICE_DESC_PARAM_PSA_MAX_DATA		= 0x25,
+	DEVICE_DESC_PARAM_PSA_TMT		= 0x29,
+	DEVICE_DESC_PARAM_PRDCT_REV		= 0x2A,
 };
 
 /*
@@ -472,9 +486,9 @@ struct ufs_query_res {
 #define UFS_VREG_VCC_MAX_UV	   3600000 /* uV */
 #define UFS_VREG_VCC_1P8_MIN_UV    1700000 /* uV */
 #define UFS_VREG_VCC_1P8_MAX_UV    1950000 /* uV */
-#define UFS_VREG_VCCQ_MIN_UV	   1140000 /* uV */
+#define UFS_VREG_VCCQ_MIN_UV	   1100000 /* uV */
 #define UFS_VREG_VCCQ_MAX_UV	   1300000 /* uV */
-#define UFS_VREG_VCCQ2_MIN_UV	   1700000 /* uV */
+#define UFS_VREG_VCCQ2_MIN_UV	   1650000 /* uV */
 #define UFS_VREG_VCCQ2_MAX_UV	   1950000 /* uV */
 
 /*
@@ -528,6 +542,12 @@ struct ufs_dev_info {
 
 	/* Device deviations from standard UFS device spec. */
 	unsigned int quirks;
+
+	unsigned int pre_eol_info;
+	unsigned int lifetime_a;
+	unsigned int lifetime_b;
+	unsigned int lifetime_c;
+	ktime_t health_cached_time;
 };
 
 #define MAX_MODEL_LEN 16
