@@ -25,6 +25,8 @@ enum {
 	MSM_DRM_BLANK_UNBLANK,
 	/* panel: power off */
 	MSM_DRM_BLANK_POWERDOWN,
+	/* panel: low power mode */
+	MSM_DRM_BLANK_LP,
 };
 
 enum msm_drm_display_id {
@@ -37,6 +39,7 @@ enum msm_drm_display_id {
 
 struct msm_drm_notifier {
 	enum msm_drm_display_id id;
+	int refresh_rate;
 	void *data;
 };
 
