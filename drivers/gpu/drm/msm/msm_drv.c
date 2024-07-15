@@ -904,14 +904,8 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 		priv->fbdev = msm_fbdev_init(ddev);
 #endif
 
-	ret = msm_debugfs_late_init(ddev);
-	if (ret)
-		goto fail;
-
-	ret = sde_dbg_debugfs_register(dev);
-	if (ret) {
-		dev_err(dev, "failed to reg sde dbg debugfs: %d\n", ret);
-		goto fail;
+	if (!msm_debugfs_late_init(ddev)) {
+		sde_dbg_debugfs_register(dev);
 	}
 
 	/* perform subdriver post initialization */
@@ -2250,7 +2244,7 @@ static int msm_pdev_probe(struct platform_device *pdev)
 
 	ret = add_display_components(&pdev->dev, &match);
 	if (ret)
-		return ret;
+		goto fail;
 
 	ret = add_gpu_components(&pdev->dev, &match);
 	if (ret)

@@ -184,8 +184,8 @@ static void put_pages(struct drm_gem_object *obj)
 				sync_for_cpu(msm_obj);
 
 			sg_free_table(msm_obj->sgt);
-			kfree(msm_obj->sgt);
 		}
+		kfree(msm_obj->sgt);
 
 		if (use_pages(obj))
 			drm_gem_put_pages(obj, msm_obj->pages, true, false);
@@ -1299,9 +1299,6 @@ struct drm_gem_object *msm_gem_import(struct drm_device *dev,
 
 	mutex_unlock(&msm_obj->lock);
 	return obj;
-
-	drm_gem_object_unreference_unlocked(obj);
-	return ERR_PTR(ret);
 }
 
 static void *_msm_gem_kernel_new(struct drm_device *dev, uint32_t size,

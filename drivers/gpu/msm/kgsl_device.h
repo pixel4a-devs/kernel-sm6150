@@ -18,8 +18,7 @@
 #include <linux/pm.h>
 #include <linux/pm_qos.h>
 #include <linux/sched.h>
-#include <linux/sched/task.h>
-#include <linux/sched/mm.h>
+#include <trace/events/gpu_mem.h>
 
 #include "kgsl.h"
 #include "kgsl_mmu.h"
@@ -292,6 +291,7 @@ struct kgsl_device {
 	uint32_t requested_state;
 
 	atomic_t active_cnt;
+	atomic64_t total_mapped;
 
 	wait_queue_head_t wait_queue;
 	wait_queue_head_t active_cnt_wq;
@@ -351,7 +351,7 @@ struct kgsl_device {
 	.halt_gate = COMPLETION_INITIALIZER((_dev).halt_gate),\
 	.idle_check_ws = __WORK_INITIALIZER((_dev).idle_check_ws,\
 			kgsl_idle_check),\
-	.context_idr = IDR_INIT(_dev),\
+	.context_idr = IDR_INIT,\
 	.wait_queue = __WAIT_QUEUE_HEAD_INITIALIZER((_dev).wait_queue),\
 	.active_cnt_wq = __WAIT_QUEUE_HEAD_INITIALIZER((_dev).active_cnt_wq),\
 	.mutex = __MUTEX_INITIALIZER((_dev).mutex),\
@@ -575,31 +575,12 @@ static inline void kgsl_process_add_stats(struct kgsl_process_private *priv,
 
 	if (ret > atomic64_read(&priv->stats[type].max))
 		atomic64_set(&priv->stats[type].max, ret);
-	add_mm_counter(current->mm, MM_UNRECLAIMABLE, (size >> PAGE_SHIFT));
 }
 
 static inline void kgsl_process_sub_stats(struct kgsl_process_private *priv,
 	unsigned int type, uint64_t size)
 {
-	struct pid *pid_struct;
-	struct task_struct *task;
-	struct mm_struct *mm;
-
 	atomic64_sub(size, &priv->stats[type].cur);
-	pid_struct = find_get_pid(pid_nr(priv->pid));
-	if (pid_struct) {
-		task = get_pid_task(pid_struct, PIDTYPE_PID);
-		if (task) {
-			mm = get_task_mm(task);
-			if (mm) {
-				add_mm_counter(mm, MM_UNRECLAIMABLE,
-					-(size >> PAGE_SHIFT));
-				mmput(mm);
-			}
-			put_task_struct(task);
-		}
-		put_pid(pid_struct);
-	}
 }
 
 static inline bool kgsl_is_register_offset(struct kgsl_device *device,
@@ -1017,5 +998,28 @@ struct kgsl_pwr_limit {
 	unsigned int level;
 	struct kgsl_device *device;
 };
+
+/**
+ * kgsl_trace_gpu_mem_total - Overall gpu memory usage tracking which includes
+ * process allocations, imported dmabufs and kgsl globals
+ * @device: A KGSL device handle
+ * @delta: delta of total mapped memory size
+ */
+#ifdef CONFIG_TRACE_GPU_MEM
+static inline void kgsl_trace_gpu_mem_total(struct kgsl_device *device,
+						s64 delta)
+{
+	u64 total_size;
+
+	if (!device)
+		return;
+
+	total_size = atomic64_add_return(delta, &device->total_mapped);
+	trace_gpu_mem_total(0, 0, total_size);
+}
+#else
+static inline void kgsl_trace_gpu_mem_total(struct kgsl_device *device,
+						s64 delta) {}
+#endif
 
 #endif  /* __KGSL_DEVICE_H */

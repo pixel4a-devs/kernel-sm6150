@@ -380,7 +380,7 @@ end:
 }
 
 static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
-	struct sde_rsc_cmd_config *cmd_config, enum sde_rsc_state state)
+	struct sde_rsc_cmd_config *cmd_config)
 {
 	const u32 cxo_period_ns = 52;
 	u64 rsc_backoff_time_ns = rsc->backoff_time_ns;
@@ -394,7 +394,6 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 	u64 pdc_backoff_time_ns;
 	s64 total;
 	int ret = 0;
-	u32 default_prefill_lines;
 
 	if (cmd_config)
 		memcpy(&rsc->cmd_config, cmd_config, sizeof(*cmd_config));
@@ -408,23 +407,12 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 		rsc->cmd_config.jitter_denom = DEFAULT_PANEL_JITTER_DENOMINATOR;
 	if (!rsc->cmd_config.vtotal)
 		rsc->cmd_config.vtotal = DEFAULT_PANEL_VTOTAL;
-
-	if (rsc->version < SDE_RSC_REV_3) {
-		default_prefill_lines = rsc->cmd_config.prefill_lines;
-		if (!default_prefill_lines)
-			default_prefill_lines = DEFAULT_PANEL_PREFILL_LINES;
-		if (default_prefill_lines > DEFAULT_PANEL_MAX_V_PREFILL)
-			default_prefill_lines =  DEFAULT_PANEL_MAX_V_PREFILL;
-		if (default_prefill_lines < DEFAULT_PANEL_MIN_V_PREFILL)
-			default_prefill_lines = DEFAULT_PANEL_MIN_V_PREFILL;
-		rsc->cmd_config.prefill_lines = default_prefill_lines;
-	} else {
-		default_prefill_lines = (rsc->cmd_config.fps *
-			DEFAULT_PANEL_MIN_V_PREFILL) / DEFAULT_PANEL_FPS;
-		if ((state == SDE_RSC_CMD_STATE) ||
-			(rsc->cmd_config.prefill_lines < default_prefill_lines))
-			rsc->cmd_config.prefill_lines = default_prefill_lines;
-	}
+	if (!rsc->cmd_config.prefill_lines)
+		rsc->cmd_config.prefill_lines = DEFAULT_PANEL_PREFILL_LINES;
+	if (rsc->cmd_config.prefill_lines > DEFAULT_PANEL_MAX_V_PREFILL)
+		rsc->cmd_config.prefill_lines = DEFAULT_PANEL_MAX_V_PREFILL;
+	if (rsc->cmd_config.prefill_lines < DEFAULT_PANEL_MIN_V_PREFILL)
+		rsc->cmd_config.prefill_lines = DEFAULT_PANEL_MIN_V_PREFILL;
 	pr_debug("frame fps:%d jitter_numer:%d jitter_denom:%d vtotal:%d prefill lines:%d\n",
 		rsc->cmd_config.fps, rsc->cmd_config.jitter_numer,
 		rsc->cmd_config.jitter_denom, rsc->cmd_config.vtotal,
@@ -443,12 +431,7 @@ static u32 sde_rsc_timer_calculate(struct sde_rsc_priv *rsc,
 	line_time_ns = div_u64(line_time_ns, rsc->cmd_config.vtotal);
 	prefill_time_ns = line_time_ns * rsc->cmd_config.prefill_lines;
 
-	/* only take jitter into account for CMD mode */
-	if (state == SDE_RSC_CMD_STATE)
-		total = frame_time_ns - frame_jitter - prefill_time_ns;
-	else
-		total = frame_time_ns - prefill_time_ns;
-
+	total = frame_time_ns - frame_jitter - prefill_time_ns;
 	if (total < 0) {
 		pr_err("invalid total time period time:%llu jiter_time:%llu blanking time:%llu\n",
 			frame_time_ns, frame_jitter, prefill_time_ns);
@@ -537,7 +520,7 @@ static int sde_rsc_switch_to_cmd_v3(struct sde_rsc_priv *rsc,
 
 	/* update timers - might not be available at next switch */
 	if (config)
-		sde_rsc_timer_calculate(rsc, config, SDE_RSC_CMD_STATE);
+		sde_rsc_timer_calculate(rsc, config);
 
 	/**
 	 * rsc clients can still send config at any time. If a config is
@@ -610,7 +593,7 @@ static int sde_rsc_switch_to_cmd_v2(struct sde_rsc_priv *rsc,
 
 	/* update timers - might not be available at next switch */
 	if (config)
-		sde_rsc_timer_calculate(rsc, config, SDE_RSC_CMD_STATE);
+		sde_rsc_timer_calculate(rsc, config);
 
 	/**
 	 * rsc clients can still send config at any time. If a config is
@@ -804,7 +787,7 @@ static int sde_rsc_switch_to_vid_v3(struct sde_rsc_priv *rsc,
 
 	/* update timers - might not be available at next switch */
 	if (config)
-		sde_rsc_timer_calculate(rsc, config, SDE_RSC_VID_STATE);
+		sde_rsc_timer_calculate(rsc, config);
 
 	/**
 	 * rsc clients can still send config at any time. If a config is
@@ -864,7 +847,7 @@ static int sde_rsc_switch_to_vid_v2(struct sde_rsc_priv *rsc,
 
 	/* update timers - might not be available at next switch */
 	if (config && (caller_client == rsc->primary_client))
-		sde_rsc_timer_calculate(rsc, config, SDE_RSC_VID_STATE);
+		sde_rsc_timer_calculate(rsc, config);
 
 	/* early exit without vsync wait for vid state */
 	if (rsc->current_state == SDE_RSC_VID_STATE)
@@ -1138,7 +1121,7 @@ static int sde_rsc_hw_init(struct sde_rsc_priv *rsc)
 		goto sde_rsc_fail;
 	}
 
-	ret = sde_rsc_timer_calculate(rsc, NULL, SDE_RSC_IDLE_STATE);
+	ret = sde_rsc_timer_calculate(rsc, NULL);
 	if (ret)
 		goto sde_rsc_fail;
 

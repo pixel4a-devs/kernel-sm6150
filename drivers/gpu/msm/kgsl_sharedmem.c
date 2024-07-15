@@ -640,9 +640,6 @@ static void kgsl_cma_coherent_free(struct kgsl_memdesc *memdesc)
 			atomic_long_sub(memdesc->size,
 				&kgsl_driver.stats.coherent);
 
-		mod_node_page_state(page_pgdat(phys_to_page(memdesc->physaddr)),
-			NR_UNRECLAIMABLE_PAGES, -(memdesc->size >> PAGE_SHIFT));
-
 		dma_free_attrs(memdesc->dev, (size_t) memdesc->size,
 			memdesc->hostptr, memdesc->physaddr, attrs);
 	}
@@ -1051,11 +1048,8 @@ void kgsl_sharedmem_free(struct kgsl_memdesc *memdesc)
 		memdesc->sgt = NULL;
 	}
 
-	memdesc->page_count = 0;
 	if (memdesc->pages)
 		kgsl_free(memdesc->pages);
-	memdesc->pages = NULL;
-
 }
 EXPORT_SYMBOL(kgsl_sharedmem_free);
 
@@ -1316,8 +1310,6 @@ int kgsl_sharedmem_alloc_contig(struct kgsl_device *device,
 	KGSL_STATS_ADD(size, &kgsl_driver.stats.coherent,
 		&kgsl_driver.stats.coherent_max);
 
-	mod_node_page_state(page_pgdat(phys_to_page(memdesc->physaddr)),
-			NR_UNRECLAIMABLE_PAGES, (size >> PAGE_SHIFT));
 err:
 	if (result)
 		kgsl_sharedmem_free(memdesc);
@@ -1433,9 +1425,6 @@ static int kgsl_cma_alloc_secure(struct kgsl_device *device,
 	/* Record statistics */
 	KGSL_STATS_ADD(aligned, &kgsl_driver.stats.secure,
 	       &kgsl_driver.stats.secure_max);
-
-	mod_node_page_state(page_pgdat(phys_to_page(memdesc->physaddr)),
-			NR_UNRECLAIMABLE_PAGES, (aligned >> PAGE_SHIFT));
 err:
 	if (result)
 		kgsl_sharedmem_free(memdesc);

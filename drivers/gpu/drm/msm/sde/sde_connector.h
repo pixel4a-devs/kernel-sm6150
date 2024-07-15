@@ -161,15 +161,6 @@ struct sde_connector_ops {
 			uint32_t event_idx, bool enable, void *display);
 
 	/**
-	 * set_backlight - set backlight level
-	 * @connector: Pointer to drm connector structure
-	 * @display: Pointer to private display structure
-	 * @bl_lvel: Backlight level
-	 */
-	int (*set_backlight)(struct drm_connector *connector,
-			void *display, u32 bl_lvl);
-
-	/**
 	 * soft_reset - perform a soft reset on the connector
 	 * @display: Pointer to private display structure
 	 * Return: Zero on success, -ERROR otherwise
@@ -314,7 +305,7 @@ struct sde_connector_ops {
 	 */
 	int (*get_panel_vfp)(void *display, int h_active, int v_active);
 
-	/**
+        /**
 	 * prepare_commit - trigger display to program pre-commit time features
 	 * @display: Pointer to private display structure
 	 * @params: Parameter bundle of connector-stored information for
@@ -323,6 +314,13 @@ struct sde_connector_ops {
 	 */
 	int (*prepare_commit)(void *display,
 			struct msm_display_conn_params *params);
+
+	/**
+	 * set_idle_hint - gives hint to display whether display is idle
+	 * @display: Pointer to private display handle
+	 * @is_idle: true if display is idle, false otherwise
+	 */
+	void (*set_idle_hint)(void *display, bool is_idle);
 };
 
 /**
@@ -386,12 +384,12 @@ struct sde_connector_evt {
  * @bl_scale_dirty: Flag to indicate PP BL scale value(s) is changed
  * @bl_scale: BL scale value for ABA feature
  * @bl_scale_ad: BL scale value for AD feature
- * @unset_bl_level: BL level that needs to be set later
  * @allow_bl_update: Flag to indicate if BL update is allowed currently or not
  * @qsync_mode: Cached Qsync mode, 0=disabled, 1=continuous mode
  * @qsync_updated: Qsync settings were updated
  * last_cmd_tx_sts: status of the last command transfer
  * @hdr_capable: external hdr support present
+ * @mode_info_lock: lock to protect mode info
  */
 struct sde_connector {
 	struct drm_connector base;
@@ -436,14 +434,13 @@ struct sde_connector {
 	bool bl_scale_dirty;
 	u32 bl_scale;
 	u32 bl_scale_ad;
-	u32 unset_bl_level;
 	bool allow_bl_update;
-
 	u32 qsync_mode;
 	bool qsync_updated;
 
 	bool last_cmd_tx_sts;
 	bool hdr_capable;
+	struct mutex mode_info_lock;
 };
 
 /**
@@ -873,6 +870,13 @@ void sde_conn_timeline_status(struct drm_connector *conn);
 void sde_connector_helper_bridge_disable(struct drm_connector *connector);
 
 /**
+ * sde_connector_helper_bridge_pre_enable - helper function for drm bridge
+ *                                          pre enable
+ * @connector: Pointer to DRM connector object
+ */
+void sde_connector_helper_bridge_pre_enable(struct drm_connector *connector);
+
+/**
  * sde_connector_destroy - destroy drm connector object
  * @connector: Pointer to DRM connector object
  */
@@ -888,10 +892,11 @@ void sde_connector_destroy(struct drm_connector *connector);
 int sde_connector_event_notify(struct drm_connector *connector, uint32_t type,
 		uint32_t len, uint32_t val);
 /**
- * sde_connector_helper_bridge_enable - helper function for drm bridge enable
+ * sde_connector_helper_bridge_post_enable - helper function for drm bridge
+ *                                           post enable
  * @connector: Pointer to DRM connector object
  */
-void sde_connector_helper_bridge_enable(struct drm_connector *connector);
+void sde_connector_helper_bridge_post_enable(struct drm_connector *connector);
 
 /**
  * sde_connector_get_panel_vfp - helper to get panel vfp
@@ -902,6 +907,14 @@ void sde_connector_helper_bridge_enable(struct drm_connector *connector);
  */
 int sde_connector_get_panel_vfp(struct drm_connector *connector,
 	struct drm_display_mode *mode);
+
+/**
+ * sde_connector_set_idle_hint - helper to give idle hint to connector
+ * @connector: pointer to drm connector
+ * @is_idle: true on idle, false on wake up from idle
+ */
+void sde_connector_set_idle_hint(struct drm_connector *connector, bool is_idle);
+
 /**
  * sde_connector_esd_status - helper function to check te status
  * @connector: Pointer to DRM connector object
