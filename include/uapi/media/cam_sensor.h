@@ -9,7 +9,56 @@
 #define CAM_FLASH_MAX_LED_TRIGGERS 3
 #define MAX_OIS_NAME_SIZE 32
 #define CAM_CSIPHY_SECURE_MODE_ENABLED 1
+
+#ifdef CONFIG_BOARD_SUNFISH
 #define CAM_IR_LED_SUPPORTED
+#endif /*CONFIG_BOARD_SUNFISH*/
+
+#ifdef CONFIG_BOARD_FLORAL
+#define MAX_RAINBOW_CONFIG_SIZE 32
+
+enum rainbow_op_type {
+	RAINBOW_SEQ_READ,
+	RAINBOW_RANDOM_READ,
+	RAINBOW_SEQ_WRITE,
+	RAINBOW_RANDOM_WRITE
+};
+
+enum strobe_type {
+	STROBE_ALTERNATIVE,
+	STROBE_SYNCHRONIZE,
+	STROBE_NONE
+};
+
+enum silego_self_test_result_type {
+	SILEGO_TEST_FAILED,
+	SILEGO_TEST_PASS,
+	SILEGO_TEST_BYPASS
+};
+
+struct rainbow_config {
+	enum rainbow_op_type operation;
+	uint32_t             size;
+	uint32_t             reg_addr[MAX_RAINBOW_CONFIG_SIZE];
+	uint32_t             reg_data[MAX_RAINBOW_CONFIG_SIZE];
+} __attribute__((packed));
+
+struct silego_self_test_result {
+	enum silego_self_test_result_type result;
+	bool is_cracked;
+} __attribute__((packed));
+
+#define RAINBOW_CONFIG \
+	_IOWR('R', 1, struct rainbow_config)
+
+#define LM36011_SET_CERTIFICATION_STATUS \
+	_IOWR('R', 1, bool)
+
+#define LM36011_SILEGO_SELF_TEST \
+	_IOWR('R', 1, struct silego_self_test_result)
+
+#endif /*CONFIG_BOARD_FLORAL*/
+
 /**
  * struct cam_sensor_query_cap - capabilities info for sensor
  *
@@ -37,7 +86,9 @@ struct  cam_sensor_query_cap {
 	uint32_t        ois_slot_id;
 	uint32_t        flash_slot_id;
 	uint32_t        csiphy_slot_id;
-	uint32_t        ir_led_slot_id;
+#ifdef CONFIG_BOARD_SUNFISH
+	int32_t        ir_led_slot_id;
+#endif /*CONFIG_BOARD_SUNFISH*/
 } __attribute__((packed));
 
 /**
@@ -103,6 +154,36 @@ struct cam_cmd_i2c_info {
 } __attribute__((packed));
 
 /**
+ * struct cam_cmd_get_ois_data - Contains OIS data read cmd
+ *
+ * @reg_addr            :    register addr to read data from
+ * @reg_data            :    number of bytes to read
+ * @query_size_handle   :    handle to user space query_size address
+ * @query_data_handle   :    handle to user space query_data address
+ */
+struct cam_cmd_get_ois_data {
+	uint32_t           reg_addr;
+	uint32_t           reg_data;
+	uint64_t           query_size_handle;
+	uint64_t           query_data_handle;
+} __attribute__((packed));
+
+/**
+ * struct cam_ois_shift - Contains OIS shift data
+ *
+ * @ois_shift_x         :    shift in x dim
+ * @ois_shift_y         :    shift in y dim
+ * @af_lop1             :    shift in z dim (0x764)
+ * @time_readout        :    time that the shift is read out
+ */
+struct cam_ois_shift {
+	int16_t             ois_shift_x;
+	int16_t             ois_shift_y;
+	int16_t             af_lop1;
+	int64_t             time_readout;
+} __attribute__((packed));
+
+/**
  * struct cam_ois_opcode - Contains OIS opcode
  *
  * @prog            :    OIS FW prog register address
@@ -150,6 +231,7 @@ struct cam_cmd_ois_info {
  * @data_mask       :   Data mask if only few bits are valid
  * @camera_id       :   Indicates the slot to which camera
  *                      needs to be probed
+ * @fw_update_flag  :   Update OIS firmware
  * @reserved
  */
 struct cam_cmd_probe {
@@ -161,6 +243,7 @@ struct cam_cmd_probe {
 	uint32_t    expected_data;
 	uint32_t    data_mask;
 	uint16_t    camera_id;
+	uint8_t     fw_update_flag;
 	uint16_t    reserved;
 } __attribute__((packed));
 
@@ -203,6 +286,7 @@ struct cam_cmd_power {
  * @ cmd_type        :   Command buffer type
  * @ data_type       :   I2C data type
  * @ addr_type       :   I2C address type
+ * @ slave_addr      :   Slave address
  * @ reserved
  */
 struct i2c_rdwr_header {
@@ -211,7 +295,13 @@ struct i2c_rdwr_header {
 	uint8_t     cmd_type;
 	uint8_t     data_type;
 	uint8_t     addr_type;
-	uint16_t    reserved;
+
+#ifdef CONFIG_BOARD_FLORAL
+	uint16_t    slave_addr;
+#endif /*CONFIG_BOARD_FLORAL*/
+#ifdef CONFIG_BOARD_SUNFISH
+	int16_t    reserved;
+#endif /*CONFIG_BOARD_SUNFISH*/
 } __attribute__((packed));
 
 /**
@@ -390,6 +480,21 @@ struct cam_sensor_streamon_dev {
 } __attribute__((packed));
 
 /**
+ * struct cam_cmd_get_sensor_data - Contains Sensor data read cmd
+ *
+ * @reg_addr            :    register addr to read data from
+ * @reg_data            :    number of bytes to read
+ * @query_size_handle   :    handle to user space query_size address
+ * @query_data_handle   :    handle to user space query_data address
+ */
+struct cam_cmd_get_sensor_data {
+	uint32_t           reg_addr;
+	uint32_t           reg_data;
+	uint64_t           query_size_handle;
+	uint64_t           query_data_handle;
+} __attribute__((packed));
+
+/**
  * struct cam_flash_init : Init command for the flash
  * @flash_type  :    flash hw type
  * @reserved
@@ -477,6 +582,8 @@ struct cam_flash_query_cap_info {
 	uint32_t    max_current_torch[CAM_FLASH_MAX_LED_TRIGGERS];
 } __attribute__ ((packed));
 
+#ifdef CONFIG_BOARD_SUNFISH
+
 /**
  * struct cam_ir_led_query_cap  :  capabilities info for ir_led
  *
@@ -484,7 +591,7 @@ struct cam_flash_query_cap_info {
  *
  */
 struct cam_ir_led_query_cap_info {
-	uint32_t    slot_info;
+       uint32_t    slot_info;
 } __attribute__ ((packed));
 
 /**
@@ -498,11 +605,14 @@ struct cam_ir_led_query_cap_info {
  *
  */
 struct cam_ir_led_set_on_off {
-	uint16_t    reserved;
-	uint8_t     opcode;
-	uint8_t     cmd_type;
-	uint32_t    ir_led_intensity;
-	uint32_t    pwm_duty_on_ns;
-	uint32_t    pwm_period_ns;
+       uint16_t    reserved;
+       uint8_t     opcode;
+       uint8_t     cmd_type;
+       uint32_t    ir_led_intensity;
+       uint32_t    pwm_duty_on_ns;
+       uint32_t    pwm_period_ns;
 } __attribute__((packed));
+
+#endif /*CONFIG_BOARD_SUNFISH*/
+
 #endif

@@ -1,7 +1,7 @@
 #ifndef UAPI_UFS_H_
 #define UAPI_UFS_H_
 
-#define MAX_QUERY_IDN	0x12
+#define MAX_QUERY_IDN	0x20
 
 /* Flag idn for Query Requests*/
 enum flag_idn {
@@ -14,6 +14,8 @@ enum flag_idn {
 	QUERY_FLAG_IDN_RESERVED2		= 0x07,
 	QUERY_FLAG_IDN_FPHYRESOURCEREMOVAL      = 0x08,
 	QUERY_FLAG_IDN_BUSY_RTC			= 0x09,
+	/* use one reserved bit */
+	QUERY_FLAG_IDN_MANUAL_GC_CONT		= 0x0E,
 };
 
 /* Attribute idn for Query requests */
@@ -36,7 +38,12 @@ enum attr_idn {
 	QUERY_ATTR_IDN_SECONDS_PASSED		= 0x0F,
 	QUERY_ATTR_IDN_CNTX_CONF		= 0x10,
 	QUERY_ATTR_IDN_CORR_PRG_BLK_NUM		= 0x11,
-	QUERY_ATTR_IDN_REF_CLK_GATING_WAIT_TIME	= 0x17,
+	QUERY_ATTR_IDN_MANUAL_GC_CONT		= 0x12,
+	QUERY_ATTR_IDN_MANUAL_GC_STATUS_1	= 0x13,
+	/* use one reserved bit */
+	QUERY_ATTR_IDN_MANUAL_GC_STATUS		= 0x17,
+        /* should be 0x17 in UFS 3.0 */
+	QUERY_ATTR_IDN_REF_CLK_GATING_WAIT_TIME	= 0xff,
 };
 
 #define QUERY_ATTR_IDN_REF_CLK_GATING_WAIT_TIME \
@@ -55,8 +62,8 @@ enum desc_idn {
 	QUERY_DESC_IDN_RFU_1		= 0x6,
 	QUERY_DESC_IDN_GEOMETRY		= 0x7,
 	QUERY_DESC_IDN_POWER		= 0x8,
-	QUERY_DESC_IDN_HEALTH           = 0x9,
-	QUERY_DESC_IDN_RFU_2		= 0x0A,
+	QUERY_DESC_IDN_HEALTH		= 0x9,
+	QUERY_DESC_IDN_RFU_2		= 0xA,
 	QUERY_DESC_IDN_MAX,
 };
 
