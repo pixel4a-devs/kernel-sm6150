@@ -3924,16 +3924,16 @@ static struct snd_soc_dai_driver msm_dai_q6_incall_record_dai[] = {
 };
 
 static struct snd_soc_dai_driver msm_dai_q6_proxy_tx_dai = {
-		.capture = {
-			.stream_name = "Proxy Capture",
-			.aif_name = "PROXY_TX",
-			.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_8000 |
-			SNDRV_PCM_RATE_16000,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE,
-			.channels_min = 1,
-			.channels_max = 2,
-			.rate_min =     8000,
-			.rate_max =     48000,
+	.capture = {
+		.stream_name = "Proxy Capture",
+		.aif_name = "PROXY_TX",
+		.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_8000 |
+			 SNDRV_PCM_RATE_16000,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		.channels_min = 1,
+		.channels_max = 2,
+		.rate_min = 8000,
+		.rate_max = 48000,
 	},
 	.ops = &msm_dai_q6_ops,
 	.id = RT_PROXY_PORT_002_TX,
@@ -3942,16 +3942,16 @@ static struct snd_soc_dai_driver msm_dai_q6_proxy_tx_dai = {
 };
 
 static struct snd_soc_dai_driver msm_dai_q6_proxy_rx_dai = {
-		.playback = {
-			.stream_name = "Proxy Playback",
-			.aif_name = "PROXY_RX",
-			.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_8000 |
-			SNDRV_PCM_RATE_16000,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE,
-			.channels_min = 1,
-			.channels_max = 2,
-			.rate_min =     8000,
-			.rate_max =     48000,
+	.playback = {
+		.stream_name = "Proxy Playback",
+		.aif_name = "PROXY_RX",
+		.rates = SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_8000 |
+			 SNDRV_PCM_RATE_16000,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		.channels_min = 1,
+		.channels_max = 2,
+		.rate_min = 8000,
+		.rate_max = 48000,
 	},
 	.ops = &msm_dai_q6_ops,
 	.id = RT_PROXY_PORT_002_RX,
@@ -6326,6 +6326,7 @@ static struct platform_driver msm_dai_q6_dev = {
 		.name = "msm-dai-q6-dev",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_dai_q6_dev_dt_match,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
@@ -6363,6 +6364,7 @@ static struct platform_driver msm_dai_q6 = {
 		.name = "msm-dai-q6",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_dai_q6_dt_match,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
@@ -6690,6 +6692,7 @@ static struct platform_driver msm_dai_tdm_q6 = {
 		.name = "msm-dai-tdm",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_dai_tdm_dt_match,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 
@@ -8309,7 +8312,8 @@ static int msm_dai_q6_tdm_prepare(struct snd_pcm_substream *substream,
 			 * if only one port, don't do group enable as there
 			 * is no group need for only one port
 			 */
-			if (dai_data->num_group_ports > 1) {
+			if ((dai_data->num_group_ports > 1) ||
+				(group_idx == IDX_GROUP_TERTIARY_TDM_TX)) {
 				rc = afe_port_group_enable(group_id,
 					&dai_data->group_cfg, true);
 				if (rc < 0) {
@@ -10345,6 +10349,7 @@ static struct platform_driver msm_dai_q6_tdm_driver = {
 		.name = "msm-dai-q6-tdm",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_dai_q6_tdm_dev_dt_match,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 

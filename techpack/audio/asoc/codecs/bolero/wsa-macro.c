@@ -2129,11 +2129,15 @@ static int wsa_macro_rx_mux_put(struct snd_kcontrol *kcontrol,
 		"%s: mux input: %d, mux output: %d, bit: %d\n",
 		__func__, rx_port_value, widget->shift, bit_input);
 
+	dev_dbg(wsa_dev,
+		"%s: mux input: %d, mux output: %d, bit: %d\n",
+		__func__, rx_port_value, widget->shift, bit_input);
+
 	switch (rx_port_value) {
 	case 0:
 		if (wsa_priv->active_ch_cnt[aif_rst]) {
 			clear_bit(bit_input,
-				  &wsa_priv->active_ch_mask[aif_rst]);
+				&wsa_priv->active_ch_mask[aif_rst]);
 			wsa_priv->active_ch_cnt[aif_rst]--;
 		}
 		break;
@@ -2252,12 +2256,12 @@ static const struct snd_kcontrol_new wsa_macro_snd_controls[] = {
 			WSA_MACRO_SOFTCLIP1, 1, 0,
 			wsa_macro_soft_clip_enable_get,
 			wsa_macro_soft_clip_enable_put),
-	SOC_SINGLE_S8_TLV("WSA_RX0 Digital Volume",
+	SOC_SINGLE_SX_TLV("WSA_RX0 Digital Volume",
 			  BOLERO_CDC_WSA_RX0_RX_VOL_CTL,
-			  -84, 40, digital_gain),
-	SOC_SINGLE_S8_TLV("WSA_RX1 Digital Volume",
+			  0, -84, 40, digital_gain),
+	SOC_SINGLE_SX_TLV("WSA_RX1 Digital Volume",
 			  BOLERO_CDC_WSA_RX1_RX_VOL_CTL,
-			  -84, 40, digital_gain),
+			  0, -84, 40, digital_gain),
 	SOC_SINGLE_EXT("WSA_RX0 Digital Mute", SND_SOC_NOPM, WSA_MACRO_RX0, 1,
 			0, wsa_macro_get_rx_mute_status,
 			wsa_macro_set_rx_mute_status),

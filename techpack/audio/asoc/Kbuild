@@ -115,9 +115,13 @@ endif
 
 # for SM8150 sound card driver
 ifdef CONFIG_SND_SOC_SM8150
+ifdef CONFIG_SND_SOC_SM8150_FLORAL
+	MACHINE_OBJS += sm8150_floral.o
+else
 	MACHINE_OBJS += sa8155.o
 	MACHINE_OBJS += sm8150.o
 	MACHINE_OBJS += machine_815x_init.o
+endif
 endif
 
 # for SM6150 sound card driver
@@ -241,3 +245,4 @@ machine_dlkm-y := $(MACHINE_OBJS)
 
 obj-$(CONFIG_SND_SOC_CPE) += cpe_lsm_dlkm.o
 cpe_lsm_dlkm-y := $(CPE_LSM_OBJS)
+

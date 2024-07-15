@@ -116,6 +116,9 @@ endif
 ifdef CONFIG_DTS_SRS_TM
 	Q6_OBJS += msm-dts-srs-tm-config.o
 endif
+ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+	Q6_OBJS += msm-cirrus-playback.o
+endif
 
 ifdef CONFIG_AFE_HWDEP
 	Q6_OBJS += q6afecal-hwdep.o
@@ -215,3 +218,4 @@ q6_pdr_dlkm-y := $(QDSP6_PDR_OBJS)
 
 obj-$(CONFIG_MSM_QDSP6_NOTIFIER) += q6_notifier_dlkm.o
 q6_notifier_dlkm-y := $(QDSP6_NOTIFIER_OBJS)
+

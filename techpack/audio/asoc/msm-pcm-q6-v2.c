@@ -1,5 +1,4 @@
-/* Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/* Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -999,22 +998,6 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 			xfer = size;
 		offset = prtd->in_frame_info[idx].offset;
 		pr_debug("Offset value = %d\n", offset);
-
-		if (offset >= size) {
-			pr_err("%s: Invalid dsp buf offset\n", __func__);
-			ret = -EFAULT;
-			q6asm_cpu_buf_release(OUT, prtd->audio_client);
-			goto fail;
-		}
-
-		if ((size == 0 || size < prtd->pcm_count) && ((offset + size) < prtd->pcm_count)) {
-			memset(bufptr + offset + size, 0, prtd->pcm_count - size);
-			if (fbytes > prtd->pcm_count)
-				size = xfer = prtd->pcm_count;
-			else
-				size = xfer = fbytes;
-		}
-
 		if (copy_to_user(buf, bufptr+offset, xfer)) {
 			pr_err("Failed to copy buf to user\n");
 			ret = -EFAULT;
@@ -1423,7 +1406,7 @@ static int msm_pcm_volume_ctl_get(struct snd_kcontrol *kcontrol,
 	soc_prtd = substream->private_data;
 	if (!substream->runtime || !soc_prtd) {
 		pr_debug("%s substream runtime or private_data not found\n",
-				 __func__);
+				__func__);
 		return 0;
 	}
 
@@ -1730,9 +1713,6 @@ static int msm_pcm_chmap_ctl_get(struct snd_kcontrol *kcontrol,
 		pr_err("%s: platform data is NULL\n", __func__);
 		return -EINVAL;
 	}
-
-	memset(ucontrol->value.integer.value, 0,
-		sizeof(ucontrol->value.integer.value));
 
 	mutex_lock(&pdata->lock);
 	prtd = substream->runtime->private_data;

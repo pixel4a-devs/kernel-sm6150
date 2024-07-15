@@ -1,6 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+/*  Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 #include <linux/slab.h>
 #include <linux/kthread.h>
@@ -2635,13 +2642,6 @@ static int voice_send_cvs_register_cal_cmd(struct voice_data *v)
 		goto unlock;
 	}
 
-	if (col_data->cal_data.size >= MAX_COL_INFO_SIZE) {
-		pr_err("%s: Invalid cal data size %d!\n",
-			__func__, col_data->cal_data.size);
-		ret = -EINVAL;
-		goto unlock;
-	}
-
 	memcpy(&cvs_reg_cal_cmd.cvs_cal_data.column_info[0],
 	       (void *) &((struct audio_cal_info_voc_col *)
 	       col_data->cal_info)->data,
@@ -4319,21 +4319,44 @@ done:
 	return ret;
 }
 
-static void voice_mic_break_work_fn(struct work_struct *work)
+static void voice_send_uevent(char *uevent)
 {
 	int ret = 0;
+
+	if (uevent == NULL)
+		return;
+
+	pr_info("uevent = %s\n", uevent);
+	mutex_lock(&common.common_lock);
+	ret = q6core_send_uevent(common.uevent_data, uevent);
+	if (ret)
+		pr_err("%s: Send UEvent %s failed :%d\n", __func__,
+			uevent, ret);
+	mutex_unlock(&common.common_lock);
+}
+
+static void voice_mic_break_work_fn(struct work_struct *work)
+{
 	char event[25] = "";
 	struct voice_data *v = container_of(work, struct voice_data,
 						voice_mic_break_work);
+	uint8_t mic_break_stat =
+		v->mic_break_status & MIC_BREAK_STAT_MIC_BREAK_MASK;
+	uint8_t mic_degrade_stat =
+		(v->mic_break_status & MIC_BREAK_STAT_MIC_DEGRADE_MASK)
+		>> MIC_DEGRADE_SHIFT_BITS;
 
-	snprintf(event, sizeof(event), "MIC_BREAK_STATUS=%s",
-			v->mic_break_status ? "TRUE" : "FALSE");
+	if (mic_break_stat) {
+		snprintf(event, sizeof(event), "MIC_BREAK_STATUS=%d",
+			 mic_break_stat);
+		voice_send_uevent(event);
+	}
 
-	mutex_lock(&common.common_lock);
-	ret = q6core_send_uevent(common.uevent_data, event);
-	if (ret)
-		pr_err("%s: Send UEvent %s failed :%d\n", __func__, event, ret);
-	mutex_unlock(&common.common_lock);
+	if (mic_degrade_stat) {
+		snprintf(event, sizeof(event), "MIC_DEGRADE_STATUS=%d",
+			 mic_degrade_stat);
+		voice_send_uevent(event);
+	}
 }
 
 static int voice_setup_vocproc(struct voice_data *v)
@@ -7619,9 +7642,17 @@ static int32_t qdsp_mvm_callback(struct apr_client_data *data, void *priv)
 			voice_act_update =
 				(struct vss_evt_voice_activity *)
 				data->payload;
+			pr_debug("activity = 0x%x\n", voice_act_update->activity);
 
+			if ((voice_act_update->activity >=
+				VSS_ICOMMON_VOICE_ACTIVITY_MIC_BREAK_STAT_BASE) &&
+			    (voice_act_update->activity <=
+				VSS_ICOMMON_VOICE_ACTIVITY_MIC_BREAK_STAT_BASE +
+				MIC_BREAK_STAT_MAX))
+			    v->mic_break_status = voice_act_update->activity -
+				    VSS_ICOMMON_VOICE_ACTIVITY_MIC_BREAK_STAT_BASE;
 			/* Drop notifications other than Mic Break */
-			if ((voice_act_update->activity
+			else if ((voice_act_update->activity
 				     != VSS_ICOMMON_VOICE_ACTIVITY_MIC_BREAK)
 				&& (voice_act_update->activity
 				     != VSS_ICOMMON_VOICE_ACITIVTY_MIC_UNBREAK))

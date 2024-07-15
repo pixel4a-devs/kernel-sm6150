@@ -1,7 +1,15 @@
 /* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
- * SPDX-License-Identifier: GPL-2.0-only
-*/
+ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
 #include <linux/slab.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
@@ -22,6 +30,10 @@
 #include <ipc/apr_tal.h>
 #include "adsp_err.h"
 #include "q6afecal-hwdep.h"
+
+#ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+#include <dsp/msm-cirrus-playback.h>
+#endif
 
 #define WAKELOCK_TIMEOUT	5000
 enum {
@@ -237,6 +249,9 @@ int afe_get_topology(int port_id)
 done:
 	return topology;
 }
+#ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+EXPORT_SYMBOL(afe_get_topology);
+#endif
 
 /**
  * afe_set_aanc_info -
@@ -614,6 +629,15 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			av_dev_drift_afe_cb_handler(data->opcode, data->payload,
 						    data->payload_size);
 		} else {
+#ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+			if (!crus_afe_callback(data->payload,
+					       data->payload_size))
+				return 0;
+#endif
+			if (rtac_make_afe_callback(data->payload,
+						   data->payload_size))
+				return 0;
+
 			if (sp_make_afe_callback(data->opcode, data->payload,
 						 data->payload_size))
 				return -EINVAL;
@@ -1036,6 +1060,26 @@ static int afe_apr_send_pkt(void *data, wait_queue_head_t *wait)
 	mutex_unlock(&this_afe.afe_apr_lock);
 	return ret;
 }
+
+#ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+int afe_apr_send_pkt_crus(void *data, int index, int set)
+{
+	int ret = 0;
+
+	ret = afe_q6_interface_prepare();
+	if (ret != 0) {
+		pr_err("%s: Q6 interface prepare failed ret: %d\n",
+				__func__, ret);
+		return -EINVAL;
+	}
+
+	if (set)
+		return afe_apr_send_pkt(data, &this_afe.wait[index]);
+	else /* get */
+		return afe_apr_send_pkt(data, 0);
+}
+EXPORT_SYMBOL(afe_apr_send_pkt_crus);
+#endif
 
 /* This function shouldn't be called directly. Instead call q6afe_set_params. */
 static int q6afe_set_params_v2(u16 port_id, int index,
@@ -2780,7 +2824,8 @@ int afe_port_set_mad_type(u16 port_id, enum afe_mad_type mad_type)
 
 	if (port_id == AFE_PORT_ID_TERTIARY_MI2S_TX ||
 		port_id == AFE_PORT_ID_INT3_MI2S_TX ||
-		port_id == AFE_PORT_ID_TX_CODEC_DMA_TX_3) {
+		port_id == AFE_PORT_ID_TX_CODEC_DMA_TX_3 ||
+		port_id == AFE_PORT_ID_TERTIARY_TDM_TX) {
 		mad_type = MAD_SW_AUDIO;
 		return 0;
 	}
@@ -2809,7 +2854,8 @@ enum afe_mad_type afe_port_get_mad_type(u16 port_id)
 
 	if (port_id == AFE_PORT_ID_TERTIARY_MI2S_TX ||
 		port_id == AFE_PORT_ID_INT3_MI2S_TX ||
-		port_id == AFE_PORT_ID_TX_CODEC_DMA_TX_3)
+		port_id == AFE_PORT_ID_TX_CODEC_DMA_TX_3 ||
+		port_id == AFE_PORT_ID_TERTIARY_TDM_TX)
 		return MAD_SW_AUDIO;
 
 	i = port_id - SLIMBUS_0_RX;
@@ -2891,6 +2937,10 @@ EXPORT_SYMBOL(afe_set_config);
 void afe_clear_config(enum afe_config_type config)
 {
 	clear_bit(config, &afe_configured_cmd);
+#ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+	if (config == AFE_CIRRUS_PORT_CONFIG)
+		msm_crus_check_set_setting(AFE_SSR);
+#endif
 }
 EXPORT_SYMBOL(afe_clear_config);
 
@@ -3279,6 +3329,8 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 	uint16_t port_index = 0;
 	enum afe_mad_type mad_type = MAD_HW_NONE;
 	int ret = 0;
+	struct cal_block_data *cal_block = NULL;
+	struct audio_cal_info_afe_top *afe_top;
 
 	if (!tdm_port) {
 		pr_err("%s: Error, no configuration data\n", __func__);
@@ -3327,6 +3379,18 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 			}
 		}
 	}
+
+	/* Obtain the calibration block for debug log
+	 * Note that afe_find_cal_topo_id_by_port needs to be called before
+	 * afe_send_cal because afe_find_cal_topo_id_by_port only finds blocks
+	 * that have not been used and afe_send_cal marks the cal_block as used
+	 * after executed.
+	 *
+	 * References:
+	 *   afe_send_cal --> send_afe_cal_type --> cal_utils_mark_cal_used
+	 */
+	cal_block = afe_find_cal_topo_id_by_port(
+		this_afe.cal_data[AFE_TOPOLOGY_CAL], port_id);
 
 	/* Also send the topology id here: */
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
@@ -3395,6 +3459,14 @@ int afe_tdm_port_start(u16 port_id, struct afe_tdm_port_config *tdm_port,
 			pr_err("%s: afe send failed %d\n", __func__, ret);
 			goto fail_cmd;
 		}
+	}
+
+	if (cal_block != NULL) {
+		afe_top = (struct audio_cal_info_afe_top *)cal_block->cal_info;
+		pr_info("%s: top_id:%x acdb_id:%d port_id:0x%x\n",
+			__func__, afe_top->topology, afe_top->acdb_id, port_id);
+	} else {
+		pr_info("%s: port_id:0x%x\n", __func__, port_id);
 	}
 
 	ret = afe_send_cmd_port_start(port_id);
@@ -4065,6 +4137,8 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 	int index = 0;
 	enum afe_mad_type mad_type;
 	uint16_t port_index;
+	struct cal_block_data *cal_block = NULL;
+	struct audio_cal_info_afe_top *afe_top;
 
 	memset(&param_hdr, 0, sizeof(param_hdr));
 	memset(&port_cfg, 0, sizeof(port_cfg));
@@ -4143,6 +4217,10 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 			}
 		}
 	}
+
+	/* Obtain the calibration block for debug log */
+	cal_block = afe_find_cal_topo_id_by_port(
+		this_afe.cal_data[AFE_TOPOLOGY_CAL], port_id);
 
 	/* Also send the topology id here: */
 	if (!(this_afe.afe_cal_mode[port_index] == AFE_CAL_MODE_NONE)) {
@@ -4406,6 +4484,15 @@ static int __afe_port_start(u16 port_id, union afe_port_config *afe_config,
 		ret = -EINVAL;
 		goto fail_cmd;
 	}
+
+	if (cal_block != NULL) {
+		afe_top = (struct audio_cal_info_afe_top *)cal_block->cal_info;
+		pr_info("%s: top_id:%x acdb_id:%d port_id:0x%x\n",
+			__func__, afe_top->topology, afe_top->acdb_id, port_id);
+	} else {
+		pr_info("%s: port_id:0x%x\n", __func__, port_id);
+	}
+
 	ret = afe_send_cmd_port_start(port_id);
 
 fail_cmd:
@@ -4805,6 +4892,9 @@ int afe_get_port_index(u16 port_id)
 		return -EINVAL;
 	}
 }
+#ifdef CONFIG_CIRRUS_SPKR_PROTECTION
+EXPORT_SYMBOL(afe_get_port_index);
+#endif
 
 /**
  * afe_open -
@@ -6441,14 +6531,6 @@ static int afe_sidetone_iir(u16 tx_port_id)
 		pr_debug("%s: adding 2 to size:%d\n", __func__, size);
 		size = size + 2;
 	}
-
-	if (size > MAX_SIDETONE_IIR_DATA_SIZE) {
-		pr_err("%s: iir_config size is out of bounds:%d\n", __func__, size);
-		mutex_unlock(&this_afe.cal_data[cal_index]->lock);
-		ret = -EINVAL;
-		goto done;
-	}
-
 	memcpy(&filter_data.iir_config, &st_iir_cal_info->iir_config, size);
 	mutex_unlock(&this_afe.cal_data[cal_index]->lock);
 
@@ -7018,7 +7100,7 @@ int afe_close(int port_id)
 		ret = -EINVAL;
 		goto fail_cmd;
 	}
-	pr_debug("%s: port_id = 0x%x\n", __func__, port_id);
+	pr_info("%s: port_id = 0x%x\n", __func__, port_id);
 	if ((port_id == RT_PROXY_DAI_001_RX) ||
 			(port_id == RT_PROXY_DAI_002_TX)) {
 		pr_debug("%s: before decrementing pcm_afe_instance %d\n",
@@ -7655,7 +7737,6 @@ int afe_spk_prot_get_calib_data(struct afe_spkr_prot_get_vi_calib *calib_resp)
 	struct param_hdr_v3 param_hdr;
 	int port = SLIMBUS_4_TX;
 	int ret = -EINVAL;
-	uint32_t th_vi_ca_state;
 
 	if (!calib_resp) {
 		pr_err("%s: Invalid params\n", __func__);
@@ -7675,12 +7756,6 @@ int afe_spk_prot_get_calib_data(struct afe_spkr_prot_get_vi_calib *calib_resp)
 	if (ret < 0) {
 		pr_err("%s: get param port 0x%x param id[0x%x]failed %d\n",
 		       __func__, port, param_hdr.param_id, ret);
-		goto get_params_fail;
-	}
-	th_vi_ca_state = this_afe.calib_data.res_cfg.th_vi_ca_state;
-	if (th_vi_ca_state < FBSP_INCORRECT_OP_MODE ||
-		th_vi_ca_state > MAX_FBSP_STATE) {
-		pr_err("%s: invalid fbsp state %d\n", __func__, th_vi_ca_state);
 		goto get_params_fail;
 	}
 	memcpy(&calib_resp->res_cfg, &this_afe.calib_data.res_cfg,
@@ -8025,9 +8100,6 @@ static int afe_set_cal_sp_th_vi_cfg(int32_t cal_type, size_t data_size,
 
 	if (cal_data == NULL ||
 	    data_size > sizeof(*cal_data) ||
-	    (data_size < sizeof(cal_data->cal_hdr) +
-		sizeof(cal_data->cal_data) +
-		sizeof(cal_data->cal_info.mode)) ||
 	    this_afe.cal_data[AFE_FB_SPKR_PROT_TH_VI_CAL] == NULL)
 		goto done;
 
@@ -8172,9 +8244,7 @@ static int afe_get_cal_sp_th_vi_param(int32_t cal_type, size_t data_size,
 
 	if (cal_data == NULL ||
 	    data_size > sizeof(*cal_data) ||
-	    (data_size < sizeof(cal_data->cal_hdr) +
-		sizeof(cal_data->cal_data) +
-		sizeof(cal_data->cal_info.mode)) ||
+	    data_size < sizeof(cal_data->cal_hdr) ||
 	    this_afe.cal_data[AFE_FB_SPKR_PROT_TH_VI_CAL] == NULL)
 		return 0;
 
@@ -8201,7 +8271,8 @@ static int afe_get_cal_sp_ex_vi_ftm_param(int32_t cal_type, size_t data_size,
 	pr_debug("%s: cal_type = %d\n", __func__, cal_type);
 	if (this_afe.cal_data[AFE_FB_SPKR_PROT_EX_VI_CAL] == NULL ||
 	    cal_data == NULL ||
-	    data_size != sizeof(*cal_data))
+	    data_size > sizeof(*cal_data) ||
+	    data_size < sizeof(cal_data->cal_hdr))
 		goto done;
 
 	mutex_lock(&this_afe.cal_data[AFE_FB_SPKR_PROT_EX_VI_CAL]->lock);

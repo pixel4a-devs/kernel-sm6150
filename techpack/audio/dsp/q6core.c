@@ -1,6 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -189,7 +196,7 @@ EXPORT_SYMBOL(q6core_send_uevent);
 static int parse_fwk_version_info(uint32_t *payload, uint16_t payload_size)
 {
 	size_t ver_size;
-	uint16_t num_services;
+	int num_services;
 
 	pr_debug("%s: Payload info num services %d\n",
 		 __func__, payload[4]);
@@ -1321,6 +1328,48 @@ unlock:
 
 	return ret;
 }
+
+int q6core_adsp_crash(void)
+{
+	int ret = 0;
+	struct avcs_cmd_adsp_crash adsp_crash;
+
+	if (!q6core_is_adsp_ready()) {
+		pr_err("%s: ADSP is not ready!\n", __func__);
+		return -ENODEV;
+	}
+
+	memset(&adsp_crash, 0, sizeof(adsp_crash));
+	mutex_lock(&q6core_lcl.cmd_lock);
+
+	adsp_crash.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
+		APR_HDR_LEN(APR_HDR_SIZE), APR_PKT_VER);
+	adsp_crash.hdr.pkt_size = sizeof(adsp_crash);
+	adsp_crash.hdr.src_svc = APR_SVC_ADSP_CORE;
+	adsp_crash.hdr.src_domain = APR_DOMAIN_APPS;
+	adsp_crash.hdr.dest_svc = APR_SVC_ADSP_CORE;
+	adsp_crash.hdr.dest_domain = APR_DOMAIN_ADSP;
+	adsp_crash.hdr.opcode = AVCS_CMD_ADSP_CRASH;
+
+	q6core_lcl.adsp_status = 0;
+	q6core_lcl.bus_bw_resp_received = 0;
+
+	ret = apr_send_pkt(q6core_lcl.core_handle_q, (uint32_t *) &adsp_crash);
+	if (ret < 0) {
+		pr_err("%s: crash ADSP failed %d\n", __func__, ret);
+		goto unlock;
+	}
+
+	ret = wait_event_timeout(q6core_lcl.bus_bw_req_wait,
+				(q6core_lcl.bus_bw_resp_received == 1),
+				msecs_to_jiffies(TIMEOUT_MS * 5));
+
+unlock:
+	mutex_unlock(&q6core_lcl.cmd_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(q6core_adsp_crash);
 
 static int get_cal_type_index(int32_t cal_type)
 {
