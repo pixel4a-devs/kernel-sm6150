@@ -3443,7 +3443,6 @@ static void mhi_update_state_info_ch(uint32_t ch_id, enum mhi_ctrl_info info)
 	}
 }
 
-
 static void mhi_update_state_info(enum mhi_ctrl_info info)
 {
 	mhi_ctx->ctrl_info = info;

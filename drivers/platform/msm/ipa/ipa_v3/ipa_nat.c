@@ -191,7 +191,7 @@ static int ipa3_nat_ipv6ct_mmap(
 			if (dev->phys_mem_size == 0 ||
 				dev->phys_mem_size > vsize) {
 				IPAERR_RL(
-				 "%s err vsize(0x%lX) phys_mem_size(0x%X)\n",
+				 "%s err vsize(0x%X) phys_mem_size(0x%X)\n",
 				 dev->name, vsize, dev->phys_mem_size);
 				result = -EINVAL;
 				goto unlock;
@@ -205,7 +205,7 @@ static int ipa3_nat_ipv6ct_mmap(
 
 		if (nmi == IPA_NAT_MEM_IN_DDR) {
 
-			IPADBG("map sz=0x%zx -> vma size=0x%08lx\n",
+			IPADBG("map sz=0x%zx -> vma size=0x%08x\n",
 				   mld_ptr->table_alloc_size,
 				   vsize);
 
@@ -228,7 +228,7 @@ static int ipa3_nat_ipv6ct_mmap(
 
 		} else { /* nmi == IPA_NAT_MEM_IN_SRAM */
 
-			IPADBG("map phys_mem_size(0x%08X) -> vma sz(0x%08lX)\n",
+			IPADBG("map phys_mem_size(0x%08X) -> vma sz(0x%08X)\n",
 				   dev->phys_mem_size, vsize);
 
 			vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
@@ -269,7 +269,7 @@ static int ipa3_nat_ipv6ct_mmap(
 		IPADBG("Mapping V6 CT: %s\n",
 			   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
-		IPADBG("map sz=0x%zx -> vma size=0x%08lx\n",
+		IPADBG("map sz=0x%zx -> vma size=0x%08x\n",
 			   dev->table_alloc_size,
 			   vsize);
 
@@ -593,7 +593,7 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 			/*
 			 * CAN fit in SRAM, hence we'll use SRAM...
 			 */
-			IPADBG("V4 NAT with size 0x%08lX will reside in: %s\n",
+			IPADBG("V4 NAT with size 0x%08X will reside in: %s\n",
 				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_SRAM));
 
@@ -636,7 +636,7 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 			/*
 			 * CAN NOT fit in SRAM, hence we'll allocate DDR...
 			 */
-			IPADBG("V4 NAT with size 0x%08lX will reside in: %s\n",
+			IPADBG("V4 NAT with size 0x%08X will reside in: %s\n",
 				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
@@ -669,7 +669,7 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 	} else {
 		if (nat_type == IPAHAL_NAT_IPV6CT) {
 
-			IPADBG("V6 CT with size 0x%08lX will reside in: %s\n",
+			IPADBG("V6 CT with size 0x%08X will reside in: %s\n",
 				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
@@ -740,7 +740,7 @@ int ipa3_allocate_nat_table(
 
 	int result;
 
-	IPADBG("table size:%lu offset:%ld\n",
+	IPADBG("table size:%u offset:%u\n",
 		   table_alloc->size, table_alloc->offset);
 
 	mutex_lock(&nm_ptr->dev.lock);
@@ -763,8 +763,7 @@ int ipa3_allocate_nat_table(
 
 		ipahal_nat_entry_size(IPAHAL_NAT_IPV4_PDN, &pdn_entry_size);
 
-		pdn_mem_ptr->size = pdn_entry_size *
-						ipa3_get_max_pdn();
+		pdn_mem_ptr->size = pdn_entry_size * IPA_MAX_PDN_NUM;
 
 		if (IPA_MEM_PART(pdn_config_size) < pdn_mem_ptr->size) {
 			IPAERR(
@@ -988,8 +987,7 @@ static inline bool chk_sram_offset_alignment(
 	u32       mask)
 {
 	if (addr & (uintptr_t) mask) {
-		IPAERR("sram addr(%pK) is not properly aligned\n",
-		       (void *)addr);
+		IPAERR("sram addr(%pK) is not properly aligned\n", addr);
 		return false;
 	}
 	return true;
@@ -1181,8 +1179,7 @@ static int ipa3_nat_create_modify_pdn_cmd(
 	IPADBG("\n");
 
 	ipahal_nat_entry_size(IPAHAL_NAT_IPV4_PDN, &pdn_entry_size);
-
-	mem_size = pdn_entry_size * ipa3_get_max_pdn();
+	mem_size = pdn_entry_size * IPA_MAX_PDN_NUM;
 
 	/* Before providing physical base address check pointer exist or not*/
 	if (!ipa3_ctx->nat_mem.pdn_mem.base)
@@ -1718,7 +1715,7 @@ int ipa3_nat_mdfy_pdn(
 		goto bail;
 	}
 
-	if (mdfy_pdn->pdn_index > (ipa3_get_max_pdn() - 1)) {
+	if (mdfy_pdn->pdn_index > (IPA_MAX_PDN_NUM - 1)) {
 		IPAERR_RL("pdn index out of range %d\n", mdfy_pdn->pdn_index);
 		result = -EPERM;
 		goto bail;

@@ -3459,8 +3459,8 @@ static struct ipa3_mem_partition ipa_4_5_mem_part = {
 	.uc_descriptor_ram_ofst	= 0x3800,
 	.uc_descriptor_ram_size	= 0x1000,
 	.pdn_config_ofst	= 0x4800,
-	.pdn_config_size	= 0x70,
-	.end_ofst		= 0x4870,
+	.pdn_config_size	= 0x50,
+	.end_ofst		= 0x4850,
 };
 
 
@@ -6368,16 +6368,17 @@ int ipa3_alloc_counter_id(struct ipa_ioc_flt_rt_counter_alloc *header)
 	int i, unused_cnt, unused_max, unused_start_id;
 	struct ipa_ioc_flt_rt_counter_alloc *counter;
 
-	idr_preload(GFP_KERNEL);
-	spin_lock(&ipa3_ctx->flt_rt_counters.hdl_lock);
-
 	counter = kmem_cache_zalloc(ipa3_ctx->fnr_stats_cache, GFP_KERNEL);
 	if (!counter) {
 		IPAERR_RL("failed to alloc fnr stats counter object\n");
 		spin_unlock(&ipa3_ctx->flt_rt_counters.hdl_lock);
 		return -ENOMEM;
 	}
+
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ipa3_ctx->flt_rt_counters.hdl_lock);
 	memcpy(counter, header, sizeof(struct ipa_ioc_flt_rt_counter_alloc));
+
 	/* allocate hw counters */
 	counter->hw_counter.start_id = 0;
 	counter->hw_counter.end_id = 0;
@@ -8063,13 +8064,13 @@ static int _ipa_suspend_resume_pipe(enum ipa_client_type client, bool suspend)
 		if (IPA_CLIENT_IS_APPS_PROD(client) ||
 			(client == IPA_CLIENT_APPS_WAN_CONS &&
 			coal_ep_idx != IPA_EP_NOT_ALLOCATED))
-			goto chan_statrt;
+			goto chan_start;
 		if (!atomic_read(&ep->sys->curr_polling_state)) {
 			IPADBG("switch ch %ld to callback\n", ep->gsi_chan_hdl);
 			gsi_config_channel_mode(ep->gsi_chan_hdl,
 					GSI_CHAN_MODE_CALLBACK);
 		}
-chan_statrt:
+chan_start:
 		res = gsi_start_channel(ep->gsi_chan_hdl);
 		if (res) {
 			IPAERR("failed to start LAN channel\n");
@@ -9782,19 +9783,4 @@ int ipa3_del_socksv5_conn(uint32_t handle)
 error:
 	mutex_unlock(&ipa3_ctx->act_tbl_lock);
 	return res;
-}
-
-/**
- * ipa3_get_max_pdn() - get max PDN number based on hardware version
- *
- * Returns:     IPA_MAX_PDN_NUM of IPAv4_5 and IPA_MAX_PDN_NUM_v4_2 for others
- *
- */
-
-int ipa3_get_max_pdn(void)
-{
-	if (ipa3_get_hw_type_index() == IPA_4_5_AUTO)
-		return IPA_MAX_PDN_NUM;
-	else
-		return IPA_MAX_PDN_NUM_v4;
 }
