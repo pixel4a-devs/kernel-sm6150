@@ -91,7 +91,6 @@ struct msm_pinctrl {
 	const struct msm_pinctrl_soc_data *soc;
 	void __iomem *regs;
 	void __iomem *pdc_regs;
-	void __iomem *spi_base;
 #ifdef CONFIG_FRAGMENTED_GPIO_ADDRESS_SPACE
 	/* For holding per tile virtual address */
 	void __iomem *per_tile_regs[4];
@@ -594,6 +593,7 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	int is_out;
 	int drive;
 	int pull;
+	int out;
 	u32 ctl_reg;
 
 	static const char * const pulls[] = {
@@ -611,10 +611,25 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	func = (ctl_reg >> g->mux_bit) & 7;
 	drive = (ctl_reg >> g->drv_bit) & 7;
 	pull = (ctl_reg >> g->pull_bit) & 3;
+	out = !!(readl_relaxed(base + g->io_reg) & BIT(g->out_bit));
 
 	seq_printf(s, " %-8s: %-3s %d", g->name, is_out ? "out" : "in", func);
 	seq_printf(s, " %dmA", msm_regval_to_drive(drive));
 	seq_printf(s, " %s", pulls[pull]);
+	if (is_out)
+		seq_printf(s, ", %s", out ? "high" : "low");
+}
+
+static bool msm_gpio_is_ignored(struct gpio_chip *chip, unsigned int gpio)
+{
+	int i;
+
+	for (i = 0; i < chip->ignored_gpios_nr; i++) {
+		if (gpio == chip->ignored_gpios[i])
+			return true;
+	}
+
+	return false;
 }
 
 static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
@@ -623,6 +638,8 @@ static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++, gpio++) {
+		if (msm_gpio_is_ignored(chip, i))
+			continue;
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
 		seq_puts(s, "\n");
 	}
@@ -1019,14 +1036,16 @@ static const struct irq_domain_ops msm_gpio_domain_ops = {
 
 static struct irq_chip msm_dirconn_irq_chip;
 
-static void msm_gpio_dirconn_handler(struct irq_desc *desc)
+static bool msm_gpio_dirconn_handler(struct irq_desc *desc)
 {
+	int res;
 	struct irq_data *irqd = irq_desc_get_handler_data(desc);
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 
 	chained_irq_enter(chip, desc);
-	generic_handle_irq(irqd->irq);
+	res = generic_handle_irq(irqd->irq);
 	chained_irq_exit(chip, desc);
+	return res == 1;
 }
 
 static void setup_pdc_gpio(struct irq_domain *domain,
@@ -1435,7 +1454,6 @@ static void add_dirconn_tlmm(struct irq_data *d, irq_hw_number_t irq)
 	struct msm_pinctrl *pctrl;
 	phys_addr_t spi_cfg_reg = 0;
 	unsigned long flags;
-	u32 offset_local;
 
 	offset = select_dir_conn_mux(d, &irq);
 	if (offset < 0 || !parent_data)
@@ -1456,19 +1474,16 @@ static void add_dirconn_tlmm(struct irq_data *d, irq_hw_number_t irq)
 		if (pctrl->spi_cfg_regs) {
 			spi_cfg_reg = pctrl->spi_cfg_regs +
 					((dir_conn_data->hwirq - 32) / 32) * 4;
-			offset_local = ((dir_conn_data->hwirq - 32) / 32) * 4;
 			if (spi_cfg_reg < pctrl->spi_cfg_end) {
 				raw_spin_lock_irqsave(&pctrl->lock, flags);
-				val = readl_relaxed(pctrl->spi_base
-							+ offset_local);
+				val = scm_io_read(spi_cfg_reg);
 				/*
 				 * Clear the respective bit for edge type
 				 * interrupt
 				 */
 				val &= ~(1 << ((dir_conn_data->hwirq - 32)
 									% 32));
-				writel_relaxed(val, pctrl->spi_base
-							+ offset_local);
+				WARN_ON(scm_io_write(spi_cfg_reg, val));
 				raw_spin_unlock_irqrestore(&pctrl->lock, flags);
 			} else
 				pr_err("%s: type config failed for SPI: %lu\n",
@@ -1522,7 +1537,6 @@ static int msm_dirconn_irq_set_type(struct irq_data *d, unsigned int type)
 	unsigned int config_val = 0;
 	unsigned int val = 0;
 	unsigned long flags;
-	u32 offset_local;
 
 	if (!parent_data)
 		return 0;
@@ -1550,14 +1564,13 @@ static int msm_dirconn_irq_set_type(struct irq_data *d, unsigned int type)
 	if (pctrl->spi_cfg_regs && type != IRQ_TYPE_NONE) {
 		spi_cfg_reg = pctrl->spi_cfg_regs +
 				((parent_data->hwirq - 32) / 32) * 4;
-		offset_local = ((parent_data->hwirq - 32) / 32) * 4;
 		if (spi_cfg_reg < pctrl->spi_cfg_end) {
 			raw_spin_lock_irqsave(&pctrl->lock, flags);
-			val = readl_relaxed(pctrl->spi_base + offset_local);
+			val = scm_io_read(spi_cfg_reg);
 			val &= ~(1 << ((parent_data->hwirq - 32) % 32));
 			if (config_val)
 				val |= (1 << ((parent_data->hwirq - 32)  % 32));
-			writel_relaxed(val, pctrl->spi_base + offset_local);
+			WARN_ON(scm_io_write(spi_cfg_reg, val));
 			raw_spin_unlock_irqrestore(&pctrl->lock, flags);
 		} else
 			pr_err("%s: type config failed for SPI: %lu\n",
@@ -1586,7 +1599,7 @@ static struct irq_chip msm_dirconn_irq_chip = {
 					| IRQCHIP_SET_TYPE_MASKED,
 };
 
-static void msm_gpio_irq_handler(struct irq_desc *desc)
+static bool msm_gpio_irq_handler(struct irq_desc *desc)
 {
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
 	const struct msm_pingroup *g;
@@ -1597,6 +1610,7 @@ static void msm_gpio_irq_handler(struct irq_desc *desc)
 	int handled = 0;
 	u32 val;
 	int i;
+	bool ret;
 
 	chained_irq_enter(chip, desc);
 
@@ -1615,11 +1629,13 @@ static void msm_gpio_irq_handler(struct irq_desc *desc)
 		}
 	}
 
+	ret = (handled != 0);
 	/* No interrupts were flagged */
 	if (handled == 0)
-		handle_bad_irq(desc);
+		ret = handle_bad_irq(desc);
 
 	chained_irq_exit(chip, desc);
+	return ret;
 }
 
 static void msm_gpio_setup_dir_connects(struct msm_pinctrl *pctrl)
@@ -1716,6 +1732,7 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 	unsigned ngpio = pctrl->soc->ngpios;
 	struct device_node *irq_parent = NULL;
 	struct irq_domain *domain_parent;
+	int ignored_gpios_nr;
 
 	if (WARN_ON(ngpio > MAX_NR_GPIO))
 		return -EINVAL;
@@ -1732,6 +1749,19 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 	if (ret) {
 		dev_err(pctrl->dev, "Failed register gpiochip\n");
 		return ret;
+	}
+
+	ignored_gpios_nr = of_property_count_u32_elems(chip->of_node,
+		"goog,ignored-gpios");
+	if (ignored_gpios_nr > 0) {
+		chip->ignored_gpios = kmalloc_array(ignored_gpios_nr,
+			sizeof(*chip->ignored_gpios), GFP_KERNEL);
+		if (!chip->ignored_gpios)
+			return -ENOMEM;
+		of_property_read_u32_array(chip->of_node, "goog,ignored-gpios",
+			chip->ignored_gpios,
+			ignored_gpios_nr);
+		chip->ignored_gpios_nr = ignored_gpios_nr;
 	}
 
 	/*
@@ -1912,7 +1942,7 @@ static int msm_pinctrl_hibernation_suspend(void)
 		spi_cfg_reg = pctrl->spi_cfg_regs;
 		for (j = 0; j < spi_cfg_regs_count; j++)
 			pctrl->spi_cfg_regs_val[j] =
-				readl_relaxed(pctrl->spi_base + j * 4);
+				scm_io_read(spi_cfg_reg + j * 4);
 	}
 	/* All normal gpios will have common registers, first save them */
 	for (i = 0; i < soc->ngpios; i++) {
@@ -1969,8 +1999,8 @@ static void msm_pinctrl_hibernation_resume(void)
 				pctrl->spi_cfg_regs) / 4 + 2;
 		spi_cfg_reg = pctrl->spi_cfg_regs;
 		for (j = 0; j < spi_cfg_regs_count; j++)
-			writel_relaxed(pctrl->spi_cfg_regs_val[j],
-					pctrl->spi_base + j * 4);
+			WARN_ON(scm_io_write(spi_cfg_reg + j * 4,
+				pctrl->spi_cfg_regs_val[j]));
 	}
 
 	/* Restore normal gpios */
@@ -2132,7 +2162,6 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	key = "spi_cfg";
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, key);
 	if (res) {
-		pctrl->spi_base = devm_ioremap_resource(&pdev->dev, res);
 		pctrl->spi_cfg_regs = res->start;
 		pctrl->spi_cfg_end = res->end;
 	}
@@ -2177,6 +2206,7 @@ int msm_pinctrl_remove(struct platform_device *pdev)
 {
 	struct msm_pinctrl *pctrl = platform_get_drvdata(pdev);
 
+	kfree(pctrl->chip.ignored_gpios);
 	gpiochip_remove(&pctrl->chip);
 
 	unregister_restart_handler(&pctrl->restart_nb);
