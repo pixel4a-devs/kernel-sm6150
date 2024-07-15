@@ -4332,6 +4332,8 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
 		cb_base = ARM_SMMU_CB(smmu, i);
 
 		fsr = readl_relaxed(cb_base + ARM_SMMU_CB_FSR);
+
+
 		if (fsr & FSR_FAULT) {
 			writel_relaxed(fsr & FSR_FAULT, cb_base +
 				       ARM_SMMU_CB_FSR);
@@ -6672,6 +6674,7 @@ static struct platform_driver qsmmuv500_tbu_driver = {
 	.driver	= {
 		.name		= "qsmmuv500-tbu",
 		.of_match_table	= of_match_ptr(qsmmuv500_tbu_of_match),
+		.probe_type	= PROBE_FORCE_SYNCHRONOUS,
 	},
 	.probe	= qsmmuv500_tbu_probe,
 };
