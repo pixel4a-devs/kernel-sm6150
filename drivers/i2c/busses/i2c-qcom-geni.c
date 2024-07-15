@@ -155,6 +155,9 @@ static void ssr_i2c_force_resume(struct device *dev);
 static struct geni_i2c_dev *gi2c_dev_dbg[MAX_SE];
 static int arr_idx;
 
+static struct geni_i2c_dev *gi2c_dev_dbg[MAX_SE];
+static int arr_idx;
+
 struct geni_i2c_err_log {
 	int err;
 	const char *msg;
@@ -180,7 +183,7 @@ static struct geni_i2c_err_log gi2c_log[] = {
 static struct geni_i2c_clk_fld geni_i2c_clk_map[] = {
 	{KHz(100), 7, 10, 11, 26},
 	{KHz(400), 2,  5, 12, 24},
-	{KHz(1000), 1, 3,  9, 18},
+	{KHz(1000), 1, 1,  5, 13},
 };
 
 static int geni_i2c_clk_map_idx(struct geni_i2c_dev *gi2c)
