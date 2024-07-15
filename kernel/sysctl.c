@@ -142,6 +142,7 @@ static int ten_thousand = 10000;
 #ifdef CONFIG_PERF_EVENTS
 static int six_hundred_forty_kb = 640 * 1024;
 #endif
+static int __maybe_unused two_hundred_million = 200000000;
 static int two_hundred_fifty_five = 255;
 
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
@@ -472,6 +473,20 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= sched_updown_migrate_handler,
 	},
 	{
+		.procname	= "sched_upmigrate_boosted",
+		.data		= &sysctl_sched_capacity_margin_up_boosted,
+		.maxlen		= sizeof(unsigned int) * MAX_MARGIN_LEVELS,
+		.mode		= 0644,
+		.proc_handler	= sched_updown_migrate_handler_boosted,
+	},
+	{
+		.procname	= "sched_downmigrate_boosted",
+		.data		= &sysctl_sched_capacity_margin_down_boosted,
+		.maxlen		= sizeof(unsigned int) * MAX_MARGIN_LEVELS,
+		.mode		= 0644,
+		.proc_handler	= sched_updown_migrate_handler_boosted,
+	},
+	{
 		.procname       = "sched_energy_aware",
 		.data           = &sysctl_sched_energy_aware,
 		.maxlen         = sizeof(unsigned int),
@@ -658,7 +673,7 @@ static struct ctl_table kern_table[] = {
 		.data		= sched_lib_name,
 		.maxlen		= LIB_PATH_LENGTH,
 		.mode		= 0644,
-		.proc_handler	= proc_dostring,
+		.proc_handler	= sysctl_sched_lib_name_handler,
 	},
 	{
 		.procname	= "sched_lib_mask_force",
@@ -1484,13 +1499,6 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
-		.procname       = "reap_mem_on_sigkill",
-		.data           = &sysctl_reap_mem_on_sigkill,
-		.maxlen         = sizeof(sysctl_reap_mem_on_sigkill),
-		.mode           = 0644,
-		.proc_handler   = proc_dointvec,
-	},
-	{
 		.procname	= "overcommit_ratio",
 		.data		= &sysctl_overcommit_ratio,
 		.maxlen		= sizeof(sysctl_overcommit_ratio),
@@ -1903,22 +1911,6 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= (void *)&mmap_rnd_compat_bits_min,
 		.extra2		= (void *)&mmap_rnd_compat_bits_max,
-	},
-#endif
-#ifdef CONFIG_SWAP
-	{
-		.procname	= "swap_ratio",
-		.data		= &sysctl_swap_ratio,
-		.maxlen		= sizeof(sysctl_swap_ratio),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-	},
-	{
-		.procname	= "swap_ratio_enable",
-		.data		= &sysctl_swap_ratio_enable,
-		.maxlen		= sizeof(sysctl_swap_ratio_enable),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
 	},
 #endif
 	{ }

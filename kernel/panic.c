@@ -29,8 +29,6 @@
 #include <linux/bug.h>
 #include <linux/ratelimit.h>
 #include <linux/sysfs.h>
-#define CREATE_TRACE_POINTS
-#include <trace/events/exception.h>
 #include <soc/qcom/minidump.h>
 
 #define PANIC_TIMER_STEP 100
@@ -42,7 +40,17 @@ static int pause_on_oops;
 static int pause_on_oops_flag;
 static DEFINE_SPINLOCK(pause_on_oops_lock);
 bool crash_kexec_post_notifiers;
+
+/*
+ * With panic_on_warn, it enable too many panic on all warnings, and kernel may
+ * not be free from legit warnings. So use CONFIG_PANIC_ON_WARN_DEFAULT_ENABLE
+ * to control panic_on_warn in debug purpose.
+ */
+#ifdef CONFIG_PANIC_ON_WARN_DEFAULT_ENABLE
+int panic_on_warn __read_mostly = 1;
+#else
 int panic_on_warn __read_mostly;
+#endif
 static unsigned int warn_limit __read_mostly;
 
 int panic_timeout = CONFIG_PANIC_TIMEOUT;
@@ -206,8 +214,6 @@ void panic(const char *fmt, ...)
 		panic_on_warn = 0;
 	}
 
-	trace_kernel_panic(0);
-
 	/*
 	 * Disable local interrupts. This will prevent panic_smp_self_stop
 	 * from deadlocking the first cpu that invokes the panic, since
@@ -337,9 +343,6 @@ void panic(const char *fmt, ...)
 			mdelay(PANIC_TIMER_STEP);
 		}
 	}
-
-	trace_kernel_panic_late(0);
-
 	if (panic_timeout != 0) {
 		/*
 		 * This will not be a clean reboot, with everything
