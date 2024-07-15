@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2012, 2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -90,11 +90,6 @@ enum cs_mode {
 	CS_MODE_PERF,
 };
 
-struct coresight_csr {
-	const char *name;
-	struct list_head link;
-};
-
 /**
  * struct cs_buffer - keep track of a recording session' specifics
  * @cur:	index of the current buffer
@@ -184,9 +179,7 @@ struct coresight_device *coresight_get_enabled_sink(bool reset);
 struct coresight_device *coresight_get_sink_by_id(u32 id);
 struct list_head *coresight_build_path(struct coresight_device *csdev,
 				       struct coresight_device *sink);
-struct coresight_device *coresight_get_source(struct list_head *path);
-void coresight_release_path(struct coresight_device *csdev,
-			    struct list_head *path);
+void coresight_release_path(struct list_head *path);
 
 #ifdef CONFIG_CORESIGHT_SOURCE_ETM3X
 extern int etm_readl_cp14(u32 off, unsigned int *val);
@@ -197,25 +190,15 @@ static inline int etm_writel_cp14(u32 off, u32 val) { return 0; }
 #endif
 
 #ifdef CONFIG_CORESIGHT_CSR
-extern void msm_qdss_csr_enable_bam_to_usb(struct coresight_csr *csr);
-extern void msm_qdss_csr_enable_flush(struct coresight_csr *csr);
-extern void msm_qdss_csr_disable_bam_to_usb(struct coresight_csr *csr);
-extern void msm_qdss_csr_disable_flush(struct coresight_csr *csr);
-extern int coresight_csr_hwctrl_set(struct coresight_csr *csr, uint64_t addr,
-				 uint32_t val);
-extern void coresight_csr_set_byte_cntr(struct coresight_csr *csr,
-				 uint32_t count);
-extern struct coresight_csr *coresight_csr_get(const char *name);
+extern void msm_qdss_csr_enable_bam_to_usb(void);
+extern void msm_qdss_csr_disable_bam_to_usb(void);
+extern void msm_qdss_csr_disable_flush(void);
+extern int coresight_csr_hwctrl_set(uint64_t addr, uint32_t val);
 #else
-static inline void msm_qdss_csr_enable_bam_to_usb(struct coresight_csr *csr) {}
-extern void msm_qdss_csr_enable_flush(struct coresight_csr *csr) {}
-static inline void msm_qdss_csr_disable_bam_to_usb(struct coresight_csr *csr) {}
-static inline void msm_qdss_csr_disable_flush(struct coresight_csr *csr) {}
-static inline int coresight_csr_hwctrl_set(struct coresight_csr *csr,
-	uint64_t addr, uint32_t val) { return -EINVAL; }
-static inline void coresight_csr_set_byte_cntr(struct coresight_csr *csr,
-					   uint32_t count) {}
-static inline struct coresight_csr *coresight_csr_get(const char *name)
-					{ return NULL; }
+static inline void msm_qdss_csr_enable_bam_to_usb(void) {}
+static inline void msm_qdss_csr_disable_bam_to_usb(void) {}
+static inline void msm_qdss_csr_disable_flush(void) {}
+static inline int coresight_csr_hwctrl_set(uint64_t addr, uint32_t val)
+							{ return -EINVAL; }
 #endif
 #endif

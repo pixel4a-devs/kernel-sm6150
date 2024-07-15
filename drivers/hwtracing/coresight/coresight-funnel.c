@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, 2017, 2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2012, 2017, The Linux Foundation. All rights reserved.
  *
  * Description: CoreSight Funnel driver
  *
@@ -100,7 +100,7 @@ static int funnel_enable(struct coresight_device *csdev, int inport,
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
 	if (first_enable)
-		dev_info(drvdata->dev, "FUNNEL inport %d enabled\n", inport);
+		dev_dbg(drvdata->dev, "FUNNEL inport %d enabled\n", inport);
 	return rc;
 }
 
@@ -138,7 +138,7 @@ static void funnel_disable(struct coresight_device *csdev, int inport,
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
 	if (last_disable)
-		dev_info(&csdev->dev, "FUNNEL inport %d disabled\n", inport);;
+		dev_dbg(drvdata->dev, "FUNNEL inport %d disabled\n", inport);
 }
 
 static const struct coresight_ops_link funnel_link_ops = {
@@ -265,26 +265,27 @@ static int funnel_probe(struct device *dev, struct resource *res)
 			return ret;
 	}
 
-	if (of_property_read_bool(np, "qcom,duplicate-funnel")) {
-		ret = funnel_get_resource_byname(np, "funnel-base-real",
-						 &res_real);
-		if (ret)
-			return ret;
+	/*
+	 * Map the device base for dynamic-funnel, which has been
+	 * validated by AMBA core.
+	 */
+	if (res) {
+		if (of_property_read_bool(np, "qcom,duplicate-funnel")) {
+			ret = funnel_get_resource_byname(np,
+							 "funnel-base-real",
+							 &res_real);
+			if (ret)
+				goto out_disable_clk;
 
-		res = &res_real;
-		base = devm_ioremap(dev, res->start, resource_size(res));
-		if (IS_ERR(base)) {
-			ret = PTR_ERR(base);
-			goto out_disable_clk;
+			res = &res_real;
+			base = devm_ioremap(dev, res->start,
+					    resource_size(res));
+		} else {
+			/* Validity of resource is already checked by the AMBA
+			 * core
+			 */
+			base = devm_ioremap_resource(dev, res);
 		}
-		drvdata->base = base;
-		desc.groups = coresight_funnel_groups;
-	} else if (res) {
-		/*
-		* Map the device base for dynamic-funnel, which has been
-		* validated by AMBA core.
-		*/
-		base = devm_ioremap_resource(dev, res);
 		if (IS_ERR(base)) {
 			ret = PTR_ERR(base);
 			goto out_disable_clk;
@@ -308,7 +309,6 @@ static int funnel_probe(struct device *dev, struct resource *res)
 	}
 
 	pm_runtime_put(dev);
-	dev_info(drvdata->dev, "FUNNEL initialized\n");
 	ret = 0;
 
 out_disable_clk:

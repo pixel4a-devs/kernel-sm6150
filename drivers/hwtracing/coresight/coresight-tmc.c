@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2017-2018, 2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * Description: CoreSight Trace Memory Controller driver
  *
@@ -143,7 +143,7 @@ static void __tmc_reg_dump(struct tmc_drvdata *drvdata)
 
 void tmc_enable_hw(struct tmc_drvdata *drvdata)
 {
-	drvdata->enable = true;
+	drvdata->sticky_enable = true;
 	writel_relaxed(TMC_CTL_CAPT_EN, drvdata->base + TMC_CTL);
 	if (drvdata->force_reg_dump)
 		__tmc_reg_dump(drvdata);
@@ -151,7 +151,6 @@ void tmc_enable_hw(struct tmc_drvdata *drvdata)
 
 void tmc_disable_hw(struct tmc_drvdata *drvdata)
 {
-	drvdata->enable = false;
 	writel_relaxed(0x0, drvdata->base + TMC_CTL);
 }
 
@@ -187,7 +186,7 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 {
 	int ret = 0;
 
-	if (!drvdata->enable || !drvdata->csdev->enable)
+	if (!drvdata->sticky_enable)
 		return -EPERM;
 
 	switch (drvdata->config_type) {
@@ -211,9 +210,6 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 static int tmc_read_unprepare(struct tmc_drvdata *drvdata)
 {
 	int ret = 0;
-
-	if (!drvdata->csdev->enable)
-		return -EPERM;
 
 	switch (drvdata->config_type) {
 	case TMC_CONFIG_TYPE_ETB:
@@ -270,25 +266,18 @@ static ssize_t tmc_read(struct file *file, char __user *data, size_t len,
 	ssize_t actual;
 	struct tmc_drvdata *drvdata = container_of(file->private_data,
 						   struct tmc_drvdata, miscdev);
-
-	mutex_lock(&drvdata->mem_lock);
-
 	actual = tmc_get_sysfs_trace(drvdata, *ppos, len, &bufp);
-	if (actual <= 0) {
-		mutex_unlock(&drvdata->mem_lock);
+	if (actual <= 0)
 		return 0;
-	}
 
 	if (copy_to_user(data, bufp, actual)) {
 		dev_dbg(drvdata->dev, "%s: copy_to_user failed\n", __func__);
-		mutex_unlock(&drvdata->mem_lock);
 		return -EFAULT;
 	}
 
 	*ppos += actual;
 	dev_dbg(drvdata->dev, "%zu bytes copied\n", actual);
 
-	mutex_unlock(&drvdata->mem_lock);
 	return actual;
 }
 
@@ -411,129 +400,6 @@ static ssize_t trigger_cntr_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(trigger_cntr);
 
-static ssize_t out_mode_show(struct device *dev,
-			     struct device_attribute *attr, char *buf)
-{
-	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-
-	return scnprintf(buf, PAGE_SIZE, "%s\n",
-			str_tmc_etr_out_mode[drvdata->out_mode]);
-}
-
-static ssize_t out_mode_store(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf, size_t size)
-{
-	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-	char str[10] = "";
-	int ret;
-
-	if (strlen(buf) >= 10)
-		return -EINVAL;
-	if (sscanf(buf, "%s", str) != 1)
-		return -EINVAL;
-	ret = tmc_etr_switch_mode(drvdata, str);
-	return ret ? ret : size;
-}
-static DEVICE_ATTR_RW(out_mode);
-
-static ssize_t pcie_path_show(struct device *dev,
-			     struct device_attribute *attr, char *buf)
-{
-	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-
-	return scnprintf(buf, PAGE_SIZE, "%s\n",
-			str_tmc_etr_pcie_path[drvdata->pcie_path]);
-}
-
-static ssize_t pcie_path_store(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf, size_t size)
-{
-	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-	char str[10] = "";
-
-	if (strlen(buf) >= 10)
-		return -EINVAL;
-	if (sscanf(buf, "%s", str) != 1)
-		return -EINVAL;
-
-	mutex_lock(&drvdata->mem_lock);
-	if (drvdata->enable) {
-		mutex_unlock(&drvdata->mem_lock);
-		pr_err("ETR is in use, disable it to switch the pcie path\n");
-		return -EINVAL;
-	}
-
-	if (!strcmp(str, str_tmc_etr_pcie_path[TMC_ETR_PCIE_SW_PATH]))
-		drvdata->pcie_path = TMC_ETR_PCIE_SW_PATH;
-	else if (!strcmp(str, str_tmc_etr_pcie_path[TMC_ETR_PCIE_HW_PATH]))
-		drvdata->pcie_path = TMC_ETR_PCIE_HW_PATH;
-	else
-		size = -EINVAL;
-
-	mutex_unlock(&drvdata->mem_lock);
-	return size;
-}
-static DEVICE_ATTR_RW(pcie_path);
-
-static ssize_t available_out_modes_show(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf)
-{
-	ssize_t len = 0;
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(str_tmc_etr_out_mode); i++)
-		len += scnprintf(buf + len, PAGE_SIZE - len, "%s ",
-				str_tmc_etr_out_mode[i]);
-
-	len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
-	return len;
-}
-static DEVICE_ATTR_RO(available_out_modes);
-
-static ssize_t block_size_show(struct device *dev,
-			     struct device_attribute *attr,
-			     char *buf)
-{
-	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-	uint32_t val = 0;
-
-	if (drvdata->byte_cntr)
-		val = drvdata->byte_cntr->block_size;
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
-			val);
-}
-
-static ssize_t block_size_store(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf,
-			      size_t size)
-{
-	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-	unsigned long val;
-
-	if (kstrtoul(buf, 0, &val))
-		return -EINVAL;
-
-	if (!drvdata->byte_cntr)
-		return -EINVAL;
-
-	if (val && val < 4096) {
-		pr_err("Assign minimum block size of 4096 bytes\n");
-		return -EINVAL;
-	}
-
-	mutex_lock(&drvdata->byte_cntr->byte_cntr_lock);
-	drvdata->byte_cntr->block_size = val;
-	mutex_unlock(&drvdata->byte_cntr->byte_cntr_lock);
-
-	return size;
-}
-static DEVICE_ATTR_RW(block_size);
-
 static int tmc_iommu_init(struct tmc_drvdata *drvdata)
 {
 	struct device_node *node = drvdata->dev->of_node;
@@ -544,7 +410,7 @@ static int tmc_iommu_init(struct tmc_drvdata *drvdata)
 		return 0;
 
 	drvdata->iommu_mapping = arm_iommu_create_mapping(&amba_bustype,
-							0, (SZ_1G * 2ULL));
+							0, (SZ_1G * 4ULL));
 	if (IS_ERR(drvdata->iommu_mapping)) {
 		dev_err(drvdata->dev, "Create mapping failed, err = %d\n", ret);
 		ret = PTR_ERR(drvdata->iommu_mapping);
@@ -618,27 +484,14 @@ static ssize_t buffer_size_store(struct device *dev,
 
 static DEVICE_ATTR_RW(buffer_size);
 
-static struct attribute *coresight_tmc_etf_attrs[] = {
-	&dev_attr_trigger_cntr.attr,
-	NULL,
-};
-
-static struct attribute *coresight_tmc_etr_attrs[] = {
+static struct attribute *coresight_tmc_attrs[] = {
 	&dev_attr_trigger_cntr.attr,
 	&dev_attr_buffer_size.attr,
-	&dev_attr_block_size.attr,
-	&dev_attr_out_mode.attr,
-	&dev_attr_available_out_modes.attr,
-	&dev_attr_pcie_path.attr,
 	NULL,
 };
 
-static const struct attribute_group coresight_tmc_etf_group = {
-	.attrs = coresight_tmc_etf_attrs,
-};
-
-static const struct attribute_group coresight_tmc_etr_group = {
-	.attrs = coresight_tmc_etr_attrs,
+static const struct attribute_group coresight_tmc_group = {
+	.attrs = coresight_tmc_attrs,
 };
 
 static const struct attribute_group coresight_tmc_mgmt_group = {
@@ -646,14 +499,8 @@ static const struct attribute_group coresight_tmc_mgmt_group = {
 	.name = "mgmt",
 };
 
-const struct attribute_group *coresight_tmc_etf_groups[] = {
-	&coresight_tmc_etf_group,
-	&coresight_tmc_mgmt_group,
-	NULL,
-};
-
-const struct attribute_group *coresight_tmc_etr_groups[] = {
-	&coresight_tmc_etr_group,
+const struct attribute_group *coresight_tmc_groups[] = {
+	&coresight_tmc_group,
 	&coresight_tmc_mgmt_group,
 	NULL,
 };
@@ -726,7 +573,6 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 	struct resource *res = &adev->res;
 	struct coresight_desc desc = { 0 };
 	struct device_node *np = adev->dev.of_node;
-	struct coresight_cti_data *ctidata;
 
 	pdata = of_get_coresight_platform_data(dev, np);
 	if (IS_ERR(pdata)) {
@@ -753,7 +599,6 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 	drvdata->base = base;
 
 	spin_lock_init(&drvdata->spinlock);
-	mutex_init(&drvdata->mem_lock);
 
 	devid = readl_relaxed(drvdata->base + CORESIGHT_DEVID);
 	drvdata->config_type = BMVAL(devid, 6, 7);
@@ -766,9 +611,6 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 					   &drvdata->size);
 		if (ret)
 			drvdata->size = SZ_1M;
-
-		drvdata->out_mode = TMC_ETR_OUT_MODE_MEM;
-		drvdata->pcie_path = TMC_ETR_PCIE_HW_PATH;
 	} else {
 		drvdata->size = readl_relaxed(drvdata->base + TMC_RSZ) * 4;
 	}
@@ -779,77 +621,33 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 		goto out;
 	}
 
-	ctidata = of_get_coresight_cti_data(dev, adev->dev.of_node);
-	if (IS_ERR(ctidata)) {
-		dev_err(dev, "invalid cti data\n");
-	} else if (ctidata && ctidata->nr_ctis == 2) {
-		drvdata->cti_flush = coresight_cti_get(ctidata->names[0]);
-		if (IS_ERR(drvdata->cti_flush)) {
-			dev_err(dev, "failed to get flush cti, defer probe\n");
-			tmc_iommu_deinit(drvdata);
-			return -EPROBE_DEFER;
-		}
-
-		drvdata->cti_reset = coresight_cti_get(ctidata->names[1]);
-		if (IS_ERR(drvdata->cti_reset)) {
-			dev_err(dev, "failed to get reset cti, defer probe\n");
-			tmc_iommu_deinit(drvdata);
-			return -EPROBE_DEFER;
-		}
-	}
-
-	ret = of_get_coresight_csr_name(adev->dev.of_node, &drvdata->csr_name);
-	if (ret) {
-		dev_err(dev, "No csr data\n");
-	} else{
-		drvdata->csr = coresight_csr_get(drvdata->csr_name);
-		if (IS_ERR(drvdata->csr)) {
-			dev_dbg(dev, "failed to get csr, defer probe\n");
-			tmc_iommu_deinit(drvdata);
-			return -EPROBE_DEFER;
-		}
-	}
 	if (of_property_read_bool(drvdata->dev->of_node, "qcom,force-reg-dump"))
 		drvdata->force_reg_dump = true;
 
 	desc.pdata = pdata;
 	desc.dev = dev;
+	desc.groups = coresight_tmc_groups;
 
 	switch (drvdata->config_type) {
 	case TMC_CONFIG_TYPE_ETB:
 		desc.type = CORESIGHT_DEV_TYPE_SINK;
-		desc.ops = &tmc_etb_cs_ops;
-		desc.groups = coresight_tmc_etf_groups;
 		desc.subtype.sink_subtype = CORESIGHT_DEV_SUBTYPE_SINK_BUFFER;
+		desc.ops = &tmc_etb_cs_ops;
 		break;
 	case TMC_CONFIG_TYPE_ETR:
 		desc.type = CORESIGHT_DEV_TYPE_SINK;
+		desc.subtype.sink_subtype = CORESIGHT_DEV_SUBTYPE_SINK_BUFFER;
 		desc.ops = &tmc_etr_cs_ops;
 		ret = tmc_etr_setup_caps(drvdata, devid, id->data);
 		if (ret)
 			goto out_iommu_deinit;
-		desc.groups = coresight_tmc_etr_groups;
-		desc.subtype.sink_subtype = CORESIGHT_DEV_SUBTYPE_SINK_BUFFER;
-
-		drvdata->byte_cntr = byte_cntr_init(adev, drvdata);
-
-		ret = tmc_etr_bam_init(adev, drvdata);
-		if (ret)
-			goto out_iommu_deinit;
 		idr_init(&drvdata->idr);
 		mutex_init(&drvdata->idr_mutex);
-
-		if (of_property_read_bool(drvdata->dev->of_node,
-			"qcom,qdss-ipa-support"))
-			ret = tmc_etr_ipa_init(adev, drvdata);
-			if (ret)
-				goto out_iommu_deinit;
 		break;
 	case TMC_CONFIG_TYPE_ETF:
 		desc.type = CORESIGHT_DEV_TYPE_LINKSINK;
-		desc.ops = &tmc_etf_cs_ops;
-		desc.groups = coresight_tmc_etf_groups;
 		desc.subtype.link_subtype = CORESIGHT_DEV_SUBTYPE_LINK_FIFO;
+		desc.ops = &tmc_etf_cs_ops;
 		break;
 	default:
 		pr_err("%s: Unsupported TMC config\n", pdata->name);

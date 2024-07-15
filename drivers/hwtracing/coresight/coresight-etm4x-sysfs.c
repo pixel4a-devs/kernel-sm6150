@@ -405,7 +405,7 @@ static ssize_t mode_store(struct device *dev,
 
 	/* bit[12], Low-power state behavior override bit */
 	if ((config->mode & ETM_MODE_LPOVERRIDE) &&
-	    (drvdata->lpoverride == true) && !drvdata->tupwr_disable)
+	    (drvdata->lpoverride == true))
 		config->eventctrl1 |= BIT(12);
 	else
 		config->eventctrl1 &= ~BIT(12);
@@ -968,11 +968,8 @@ static ssize_t addr_range_show(struct device *dev,
 	spin_lock(&drvdata->spinlock);
 	idx = config->addr_idx;
 
-	if (idx >= ETM_MAX_SINGLE_ADDR_CMP) {
-		spin_unlock(&drvdata->spinlock);
+	if (idx >= ETM_MAX_SINGLE_ADDR_CMP)
 		return -EINVAL;
-	}
-
 	if (idx % 2 != 0) {
 		spin_unlock(&drvdata->spinlock);
 		return -EPERM;
@@ -1009,11 +1006,8 @@ static ssize_t addr_range_store(struct device *dev,
 	spin_lock(&drvdata->spinlock);
 	idx = config->addr_idx;
 
-	if (idx >= ETM_MAX_SINGLE_ADDR_CMP) {
-		spin_unlock(&drvdata->spinlock);
+	if (idx >= ETM_MAX_SINGLE_ADDR_CMP)
 		return -EINVAL;
-	}
-
 	if (idx % 2 != 0) {
 		spin_unlock(&drvdata->spinlock);
 		return -EPERM;
