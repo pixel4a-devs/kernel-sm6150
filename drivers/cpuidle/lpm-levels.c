@@ -52,8 +52,10 @@
 #elif defined(CONFIG_COMMON_CLK_MSM)
 #include "../../drivers/clk/msm/clock.h"
 #endif /* CONFIG_COMMON_CLK */
+#include "../soc/qcom/msm_bus/msm_bus_core.h"
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
+#include <linux/gpio.h>
 
 #define SCLK_HZ (32768)
 #define PSCI_POWER_STATE(reset) (reset << 30)
@@ -545,7 +547,7 @@ static uint64_t lpm_cpuidle_predict(struct cpuidle_device *dev,
 		history->hinvalid = 0;
 		history->htmr_wkup = 1;
 		history->stime = 0;
-		return 0;
+		return 1;
 	}
 
 	/*
@@ -743,9 +745,11 @@ static int cpu_power_select(struct cpuidle_device *dev,
 			 * call prediction.
 			 */
 			if (next_wakeup_us > max_residency) {
-				predicted = lpm_cpuidle_predict(dev, cpu,
-					&idx_restrict, &idx_restrict_time,
-					&ipi_predicted);
+				predicted = (lpm_cpuidle_predict(dev, cpu,
+					&idx_restrict,
+					&idx_restrict_time,
+                                        &ipi_predicted) == 1) ? 0 :
+						(max_residency >> 1);
 				if (predicted && (predicted < min_residency))
 					predicted = min_residency;
 			} else
@@ -1146,10 +1150,15 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 		 * This debug information is useful to know which are the
 		 * clocks that are enabled and preventing the system level
 		 * LPMs(XO and Vmin).
+		 * Prints have also been enabled in the bus driver to dump
+		 * the list of active  bus requests while going into suspend.
+		 * Any active bus request can block system sleep and this
+		 * helps to debug CXSD wedge issues.
 		 */
-		if (!from_idle)
-			clock_debug_print_enabled(true);
-
+		if (!from_idle) {
+			clock_debug_print_enabled(false);
+			msm_bus_dbg_suspend_print_clients();
+		}
 		cpu = get_next_online_cpu(from_idle);
 		cpumask_copy(&cpumask, cpumask_of(cpu));
 		clear_predict_history();
@@ -1413,6 +1422,13 @@ static bool psci_enter_sleep(struct lpm_cpu *cpu, int idx, bool from_idle)
 	update_debug_pc_event(CPU_ENTER, state_id,
 			0xdeaffeed, 0xdeaffeed, from_idle);
 	stop_critical_timings();
+
+#ifdef CONFIG_DEBUG_FS
+	if (!from_idle && pm_gpio_debug_mask) {
+		msm_gpio_dump(NULL);
+		pmic_gpio_dump(NULL);
+	}
+#endif
 
 	success = !arm_cpuidle_suspend(state_id);
 
