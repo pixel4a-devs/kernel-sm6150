@@ -250,23 +250,31 @@ static void enable_trigger_defer_cycle(void)
  * Instead, this initcall makes sure that deferred probing is delayed until
  * all the registered initcall functions at a particular level are completed.
  * This function is invoked at every *_initcall_sync level.
+ *
+ * TODO(brendanhiggins@google.com): we disable this for KUnit because this
+ * repeated probing behavior is broken in UML. The exact reason is unknown, but
+ * the regession was introduced by b8d15269411d1944bd8f3c189147c01840710355 --
+ * "dd: Invoke one probe retry cycle after every initcall level". This should
+ * probably be fixed in the Code Aurora codebase.
  */
+#if !IS_ENABLED(CONFIG_TEST)
 static int deferred_probe_initcall(void)
 {
 	enable_trigger_defer_cycle();
 	driver_deferred_probe_enable = false;
+	initcalls_done = true;
 	return 0;
 }
 arch_initcall_sync(deferred_probe_initcall);
 subsys_initcall_sync(deferred_probe_initcall);
 fs_initcall_sync(deferred_probe_initcall);
 device_initcall_sync(deferred_probe_initcall);
+#endif
 
 static int deferred_probe_enable_fn(void)
 {
 	/* Enable deferred probing for all time */
 	enable_trigger_defer_cycle();
-	initcalls_done = true;
 	return 0;
 }
 late_initcall(deferred_probe_enable_fn);
@@ -517,6 +525,23 @@ done:
 	return ret;
 }
 
+/*
+ * For initcall_debug, show the driver probe time.
+ */
+static int really_probe_debug(struct device *dev, struct device_driver *drv)
+{
+	ktime_t calltime, delta, rettime;
+	int ret;
+
+	calltime = ktime_get();
+	ret = really_probe(dev, drv);
+	rettime = ktime_get();
+	delta = ktime_sub(rettime, calltime);
+	printk(KERN_DEBUG "probe of %s returned %d after %lld usecs\n",
+	       dev_name(dev), ret, (s64) ktime_to_us(delta));
+	return ret;
+}
+
 /**
  * driver_probe_done
  * Determine if the probe sequence is finished or not.
@@ -575,7 +600,10 @@ int driver_probe_device(struct device_driver *drv, struct device *dev)
 		pm_runtime_get_sync(dev->parent);
 
 	pm_runtime_barrier(dev);
-	ret = really_probe(dev, drv);
+	if (initcall_debug)
+		ret = really_probe_debug(dev, drv);
+	else
+		ret = really_probe(dev, drv);
 	pm_request_idle(dev);
 
 	if (dev->parent)
@@ -612,6 +640,12 @@ bool driver_allows_async_probing(struct device_driver *drv)
 		return false;
 
 	default:
+#ifdef CONFIG_BUILTINS_ASYNC_PROBE
+		if (drv->owner)
+			return drv->owner->async_probe_requested;
+		else
+			return IS_ENABLED(CONFIG_BUILTINS_ASYNC_PROBE);
+#else
 		if (cmdline_requested_async_probing(drv->name))
 			return true;
 
@@ -619,6 +653,7 @@ bool driver_allows_async_probing(struct device_driver *drv)
 			return true;
 
 		return false;
+#endif
 	}
 }
 
@@ -854,13 +889,13 @@ static int __driver_attach(struct device *dev, void *data)
 		return 0;
 	} /* ret > 0 means positive match */
 
-	if (lock_parent(dev))	/* Needed for USB */
+	if (dev->parent && dev->bus->need_parent_lock)
 		device_lock(dev->parent);
 	device_lock(dev);
 	if (!dev->driver)
 		driver_probe_device(drv, dev);
 	device_unlock(dev);
-	if (lock_parent(dev))
+	if (dev->parent && dev->bus->need_parent_lock)
 		device_unlock(dev->parent);
 
 	return 0;
@@ -955,7 +990,7 @@ void device_release_driver_internal(struct device *dev,
 				    struct device_driver *drv,
 				    struct device *parent)
 {
-	if (parent)
+	if (parent && dev->bus->need_parent_lock)
 		device_lock(parent);
 
 	device_lock(dev);
@@ -963,7 +998,7 @@ void device_release_driver_internal(struct device *dev,
 		__device_release_driver(dev, parent);
 
 	device_unlock(dev);
-	if (parent)
+	if (parent && dev->bus->need_parent_lock)
 		device_unlock(parent);
 }
 
