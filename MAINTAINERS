@@ -5144,16 +5144,6 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kristoffer/linux-hpc.git
 F:	drivers/video/fbdev/s1d13xxxfb.c
 F:	include/video/s1d13xxxfb.h
 
-EROFS FILE SYSTEM
-M:	Gao Xiang <xiang@kernel.org>
-M:	Chao Yu <yuchao0@huawei.com>
-L:	linux-erofs@lists.ozlabs.org
-S:	Maintained
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs.git
-F:	Documentation/filesystems/erofs.txt
-F:	fs/erofs/
-F:	include/trace/events/erofs.h
-
 ERRSEQ ERROR TRACKING INFRASTRUCTURE
 M:	Jeff Layton <jlayton@poochiereds.net>
 S:	Maintained
@@ -5280,6 +5270,7 @@ F:	Documentation/ABI/testing/sysfs-fs-f2fs
 F:	fs/f2fs/
 F:	include/linux/f2fs_fs.h
 F:	include/trace/events/f2fs.h
+F:	include/uapi/linux/f2fs.h
 
 F71805F HARDWARE MONITORING DRIVER
 M:	Jean Delvare <jdelvare@suse.com>
@@ -6795,6 +6786,13 @@ F:	Documentation/hwmon/ina2xx
 F:	drivers/hwmon/ina2xx.c
 F:	include/linux/platform_data/ina2xx.h
 
+INCREMENTAL FILE SYSTEM
+M:	Paul Lawrence <paullawrence@google.com>
+L:	linux-unionfs@vger.kernel.org
+S:	Supported
+F:	fs/incfs/
+F:	tools/testing/selftests/filesystems/incfs/
+
 INDUSTRY PACK SUBSYSTEM (IPACK)
 M:	Samuel Iglesias Gonsalvez <siglesias@igalia.com>
 M:	Jens Taprogge <jens.taprogge@taprogge.org>
@@ -7536,6 +7534,20 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/shuah/linux-kselftest.git
 S:	Maintained
 F:	tools/testing/selftests/
 F:	Documentation/dev-tools/kselftest*
+
+KERNEL UNIT TESTING FRAMEWORK (KUnit)
+M:	Brendan Higgins <brendanhiggins@google.com>
+L:	linux-kernel@vger.kernel.org
+S:	Maintained
+F:	Documentation/test/
+F:	arch/um/include/asm/io-mock-shared.h
+F:	arch/um/include/asm/io-mock.h
+F:	arch/um/kernel/io-mock.c
+F:	drivers/base/platform-mock.c
+F:	include/linux/platform_device_mock.h
+F:	include/test/
+F:	test/
+F:	tools/testing/kunit/
 
 KERNEL USERMODE HELPER
 M:	"Luis R. Rodriguez" <mcgrof@kernel.org>
@@ -14086,6 +14098,12 @@ F:	drivers/usb/
 F:	include/linux/usb.h
 F:	include/linux/usb/
 
+USB TYPEC PI3USB30532 MUX DRIVER
+M:	Hans de Goede <hdegoede@redhat.com>
+L:	linux-usb@vger.kernel.org
+S:	Maintained
+F:	drivers/usb/typec/mux/pi3usb30532.c
+
 USB TYPEC SUBSYSTEM
 M:	Heikki Krogerus <heikki.krogerus@linux.intel.com>
 L:	linux-usb@vger.kernel.org
@@ -14094,6 +14112,21 @@ F:	Documentation/ABI/testing/sysfs-class-typec
 F:	Documentation/usb/typec.rst
 F:	drivers/usb/typec/
 F:	include/linux/usb/typec.h
+
+USB TYPEC BUS FOR ALTERNATE MODES
+M:	Heikki Krogerus <heikki.krogerus@linux.intel.com>
+L:	linux-usb@vger.kernel.org
+S:	Maintained
+F:	Documentation/ABI/testing/sysfs-bus-typec
+F:	Documentation/driver-api/usb/typec_bus.rst
+F:	drivers/usb/typec/altmodes/
+F:	include/linux/usb/typec_altmode.h
+
+USB TYPEC PORT CONTROLLER DRIVERS
+M:	Guenter Roeck <linux@roeck-us.net>
+L:	linux-usb@vger.kernel.org
+S:	Maintained
+F:	drivers/usb/typec/tcpm/
 
 USB UHCI DRIVER
 M:	Alan Stern <stern@rowland.harvard.edu>
@@ -14610,14 +14643,6 @@ M:	William Breathitt Gray <vilhelm.gray@gmail.com>
 L:	linux-gpio@vger.kernel.org
 S:	Maintained
 F:	drivers/gpio/gpio-ws16c48.c
-
-WIREGUARD SECURE NETWORK TUNNEL
-M:	Jason A. Donenfeld <Jason@zx2c4.com>
-S:	Maintained
-F:	drivers/net/wireguard/
-F:	tools/testing/selftests/wireguard/
-L:	wireguard@lists.zx2c4.com
-L:	netdev@vger.kernel.org
 
 WISTRON LAPTOP BUTTON DRIVER
 M:	Miloslav Trmac <mitr@volny.cz>
