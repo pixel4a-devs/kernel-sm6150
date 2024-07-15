@@ -282,6 +282,7 @@ static struct clk_init_data osm_clks_init[] = {
 		.name = "l3_clk",
 		.parent_names = (const char *[]){ "bi_tcxo_ao" },
 		.num_parents = 1,
+		.flags = CLK_CHILD_NO_RATE_PROP,
 		.ops = &clk_ops_l3_osm,
 	},
 	[1] = {
@@ -607,9 +608,12 @@ static unsigned int
 osm_cpufreq_fast_switch(struct cpufreq_policy *policy, unsigned int target_freq)
 {
 	int index;
+	unsigned int relation;
 
-	index = cpufreq_frequency_table_target(policy, target_freq,
-							CPUFREQ_RELATION_L);
+	relation = target_freq < policy->max ? CPUFREQ_RELATION_L :
+					       CPUFREQ_RELATION_H;
+
+	index = cpufreq_frequency_table_target(policy, target_freq, relation);
 	if (index < 0)
 		return 0;
 
