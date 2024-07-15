@@ -136,10 +136,10 @@ static DEFINE_IDR(qrtr_ports);
 static DEFINE_MUTEX(qrtr_port_lock);
 
 /* backup buffers */
-#define QRTR_BACKUP_HI_NUM	5
-#define QRTR_BACKUP_HI_SIZE	SZ_16K
-#define QRTR_BACKUP_LO_NUM	20
-#define QRTR_BACKUP_LO_SIZE	SZ_1K
+#define QRTR_BACKUP_HI_NUM 5
+#define QRTR_BACKUP_HI_SIZE SZ_16K
+#define QRTR_BACKUP_LO_NUM 20
+#define QRTR_BACKUP_LO_SIZE SZ_1K
 static struct sk_buff_head qrtr_backup_lo;
 static struct sk_buff_head qrtr_backup_hi;
 static struct work_struct qrtr_backup_work;
@@ -1613,6 +1613,10 @@ static int qrtr_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 			return -ENOTCONN;
 		}
 		enqueue_fn = qrtr_bcast_enqueue;
+		if (addr->sq_port != QRTR_PORT_CTRL) {
+			release_sock(sk);
+			return -EINVAL;
+		}
 	} else if (addr->sq_node == ipc->us.sq_node) {
 		enqueue_fn = qrtr_local_enqueue;
 	} else {
@@ -1621,12 +1625,12 @@ static int qrtr_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 			release_sock(sk);
 			return -ECONNRESET;
 		}
-		enqueue_fn = qrtr_node_enqueue;
 
 		if (ipc->state > QRTR_STATE_INIT && ipc->state != node->nid)
 			ipc->state = QRTR_STATE_MULTI;
 		else if (ipc->state == QRTR_STATE_INIT)
 			ipc->state = node->nid;
+		enqueue_fn = qrtr_node_enqueue;
 	}
 
 	plen = (len + 3) & ~3;
