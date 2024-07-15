@@ -28,7 +28,6 @@
 #include <linux/mempool.h>
 #include <linux/workqueue.h>
 #include <linux/cgroup.h>
-#include <linux/blk-crypto.h>
 
 #include <trace/events/block.h>
 #include "blk.h"
@@ -244,8 +243,6 @@ fallback:
 void bio_uninit(struct bio *bio)
 {
 	bio_disassociate_task(bio);
-
-	bio_crypt_free_ctx(bio);
 }
 EXPORT_SYMBOL(bio_uninit);
 
@@ -580,6 +577,18 @@ inline int bio_phys_segments(struct request_queue *q, struct bio *bio)
 }
 EXPORT_SYMBOL(bio_phys_segments);
 
+static inline void bio_clone_crypt_key(struct bio *dst, const struct bio *src)
+{
+#ifdef CONFIG_PFK
+	dst->bi_iter.bi_dun = src->bi_iter.bi_dun;
+#ifdef CONFIG_DM_DEFAULT_KEY
+	dst->bi_crypt_key = src->bi_crypt_key;
+	dst->bi_crypt_skip = src->bi_crypt_skip;
+#endif
+	dst->bi_dio_inode = src->bi_dio_inode;
+#endif
+}
+
 /**
  * 	__bio_clone_fast - clone a bio that shares the original bio's biovec
  * 	@bio: destination bio
@@ -608,6 +617,8 @@ void __bio_clone_fast(struct bio *bio, struct bio *bio_src)
 	bio->bi_write_hint = bio_src->bi_write_hint;
 	bio->bi_iter = bio_src->bi_iter;
 	bio->bi_io_vec = bio_src->bi_io_vec;
+	bio->bi_alloc_ts = bio_src->bi_alloc_ts;
+	bio_clone_crypt_key(bio, bio_src);
 
 	bio_clone_blkcg_association(bio, bio_src);
 }
@@ -631,12 +642,15 @@ struct bio *bio_clone_fast(struct bio *bio, gfp_t gfp_mask, struct bio_set *bs)
 
 	__bio_clone_fast(b, bio);
 
-	bio_crypt_clone(b, bio, gfp_mask);
+	if (bio_integrity(bio)) {
+		int ret;
 
-	if (bio_integrity(bio) &&
-	    bio_integrity_clone(b, bio, gfp_mask) < 0) {
-		bio_put(b);
-		return NULL;
+		ret = bio_integrity_clone(b, bio, gfp_mask);
+
+		if (ret < 0) {
+			bio_put(b);
+			return NULL;
+		}
 	}
 
 	return b;
@@ -689,6 +703,7 @@ struct bio *bio_clone_bioset(struct bio *bio_src, gfp_t gfp_mask,
 	bio->bi_write_hint	= bio_src->bi_write_hint;
 	bio->bi_iter.bi_sector	= bio_src->bi_iter.bi_sector;
 	bio->bi_iter.bi_size	= bio_src->bi_iter.bi_size;
+	bio->bi_alloc_ts	= bio_src->bi_alloc_ts;
 
 	switch (bio_op(bio)) {
 	case REQ_OP_DISCARD:
@@ -704,8 +719,6 @@ struct bio *bio_clone_bioset(struct bio *bio_src, gfp_t gfp_mask,
 		break;
 	}
 
-	bio_crypt_clone(bio, bio_src, gfp_mask);
-
 	if (bio_integrity(bio_src)) {
 		int ret;
 
@@ -716,6 +729,7 @@ struct bio *bio_clone_bioset(struct bio *bio_src, gfp_t gfp_mask,
 		}
 	}
 
+	bio_clone_crypt_key(bio, bio_src);
 	bio_clone_blkcg_association(bio, bio_src);
 
 	return bio;
@@ -1037,7 +1051,6 @@ void bio_advance(struct bio *bio, unsigned bytes)
 	if (bio_integrity(bio))
 		bio_integrity_advance(bio, bytes);
 
-	bio_crypt_advance(bio, bytes);
 	bio_advance_iter(bio, &bio->bi_iter, bytes);
 }
 EXPORT_SYMBOL(bio_advance);
@@ -1895,10 +1908,6 @@ void bio_endio(struct bio *bio)
 again:
 	if (!bio_remaining_done(bio))
 		return;
-
-	if (!blk_crypto_endio(bio))
-		return;
-
 	if (!bio_integrity_endio(bio))
 		return;
 

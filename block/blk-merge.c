@@ -9,7 +9,7 @@
 #include <linux/scatterlist.h>
 
 #include <trace/events/block.h>
-
+#include <linux/pfk.h>
 #include "blk.h"
 
 static struct bio *blk_bio_discard_split(struct request_queue *q,
@@ -210,16 +210,6 @@ void blk_queue_split(struct request_queue *q, struct bio **bio)
 	if (split) {
 		/* there isn't chance to merge the splitted bio */
 		split->bi_opf |= REQ_NOMERGE;
-
-		/*
-		 * Since we're recursing into make_request here, ensure
-		 * that we mark this bio as already having entered the queue.
-		 * If not, and the queue is going away, we can get stuck
-		 * forever on waiting for the queue reference to drop. But
-		 * that will never happen, as we're already holding a
-		 * reference to it.
-		 */
-		bio_set_flag(*bio, BIO_QUEUE_ENTERED);
 
 		bio_chain(split, *bio);
 		trace_block_split(q, split, (*bio)->bi_iter.bi_sector);
@@ -509,13 +499,13 @@ int ll_back_merge_fn(struct request_queue *q, struct request *req,
 	if (blk_integrity_rq(req) &&
 	    integrity_req_gap_back_merge(req, bio))
 		return 0;
+	if (blk_try_merge(req, bio) != ELEVATOR_BACK_MERGE)
+		return 0;
 	if (blk_rq_sectors(req) + bio_sectors(bio) >
 	    blk_rq_get_max_sectors(req, blk_rq_pos(req))) {
 		req_set_nomerge(q, req);
 		return 0;
 	}
-	if (!bio_crypt_ctx_mergeable(req->bio, blk_rq_bytes(req), bio))
-		return 0;
 	if (!bio_flagged(req->biotail, BIO_SEG_VALID))
 		blk_recount_segments(q, req->biotail);
 	if (!bio_flagged(bio, BIO_SEG_VALID))
@@ -533,13 +523,13 @@ int ll_front_merge_fn(struct request_queue *q, struct request *req,
 	if (blk_integrity_rq(req) &&
 	    integrity_req_gap_front_merge(req, bio))
 		return 0;
+	if (blk_try_merge(req, bio) != ELEVATOR_FRONT_MERGE)
+		return 0;
 	if (blk_rq_sectors(req) + bio_sectors(bio) >
 	    blk_rq_get_max_sectors(req, bio->bi_iter.bi_sector)) {
 		req_set_nomerge(q, req);
 		return 0;
 	}
-	if (!bio_crypt_ctx_mergeable(bio, bio->bi_iter.bi_size, req->bio))
-		return 0;
 	if (!bio_flagged(bio, BIO_SEG_VALID))
 		blk_recount_segments(q, bio);
 	if (!bio_flagged(req->bio, BIO_SEG_VALID))
@@ -616,9 +606,6 @@ static int ll_merge_requests_fn(struct request_queue *q, struct request *req,
 	if (blk_integrity_merge_rq(q, req, next) == false)
 		return 0;
 
-	if (!bio_crypt_ctx_mergeable(req->bio, blk_rq_bytes(req), next->bio))
-		return 0;
-
 	/* Merge is OK... */
 	req->nr_phys_segments = total_phys_segments;
 	return 1;
@@ -670,6 +657,37 @@ static void blk_account_io_merge(struct request *req)
 		part_stat_unlock();
 	}
 }
+/*
+ * Two cases of handling DISCARD merge:
+ * If max_discard_segments > 1, the driver takes every bio
+ * as a range and send them to controller together. The ranges
+ * needn't to be contiguous.
+ * Otherwise, the bios/requests will be handled as same as
+ * others which should be contiguous.
+ */
+static inline bool blk_discard_mergable(struct request *req)
+{
+	if (req_op(req) == REQ_OP_DISCARD &&
+	    queue_max_discard_segments(req->q) > 1)
+		return true;
+	return false;
+}
+
+enum elv_merge blk_try_req_merge(struct request *req, struct request *next)
+{
+	if (blk_discard_mergable(req))
+		return ELEVATOR_DISCARD_MERGE;
+	else if (blk_rq_pos(req) + blk_rq_sectors(req) == blk_rq_pos(next))
+		return ELEVATOR_BACK_MERGE;
+
+	return ELEVATOR_NO_MERGE;
+}
+
+static bool crypto_not_mergeable(const struct bio *bio, const struct bio *nxt,
+						unsigned int sectors)
+{
+	return (!pfk_allow_merge_bio(bio, nxt, sectors));
+}
 
 /*
  * For non-mq, this has to be called with the request spinlock acquired.
@@ -708,6 +726,9 @@ static struct request *attempt_merge(struct request_queue *q,
 	 */
 	if (req->write_hint != next->write_hint)
 		return NULL;
+
+	if (crypto_not_mergeable(req->bio, next->bio, blk_rq_sectors(req)))
+		return 0;
 
 	/*
 	 * If we are allowed to merge, then append bio list
@@ -840,21 +861,23 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 	if (rq->write_hint != bio->bi_write_hint)
 		return false;
 
-	/* Only merge if the crypt contexts are compatible */
-	if (!bio_crypt_ctx_compatible(bio, rq->bio))
-		return false;
-
 	return true;
 }
 
 enum elv_merge blk_try_merge(struct request *rq, struct bio *bio)
 {
-	if (req_op(rq) == REQ_OP_DISCARD &&
-	    queue_max_discard_segments(rq->q) > 1)
+	if (blk_discard_mergable(rq)) {
 		return ELEVATOR_DISCARD_MERGE;
-	else if (blk_rq_pos(rq) + blk_rq_sectors(rq) == bio->bi_iter.bi_sector)
+	} else if (blk_rq_pos(rq) + blk_rq_sectors(rq) ==
+						bio->bi_iter.bi_sector) {
+		if (crypto_not_mergeable(rq->bio, bio, blk_rq_sectors(rq)))
+			return ELEVATOR_NO_MERGE;
 		return ELEVATOR_BACK_MERGE;
-	else if (blk_rq_pos(rq) - bio_sectors(bio) == bio->bi_iter.bi_sector)
+	} else if (blk_rq_pos(rq) - bio_sectors(bio) ==
+						bio->bi_iter.bi_sector) {
+		if (crypto_not_mergeable(bio, rq->bio, bio_sectors(bio)))
+			return ELEVATOR_NO_MERGE;
 		return ELEVATOR_FRONT_MERGE;
+	}
 	return ELEVATOR_NO_MERGE;
 }

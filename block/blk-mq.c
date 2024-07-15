@@ -408,8 +408,7 @@ struct request *blk_mq_alloc_request(struct request_queue *q, unsigned int op,
 	struct request *rq;
 	int ret;
 
-	ret = blk_queue_enter(q, !(flags & BLK_MQ_REQ_NOWAIT) ? op :
-			op | REQ_NOWAIT);
+	ret = blk_queue_enter(q, flags & BLK_MQ_REQ_NOWAIT);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -2465,7 +2464,8 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
 	blk_mq_add_queue_tag_set(set, q);
 	blk_mq_map_swqueue(q);
 
-	if (!(set->flags & BLK_MQ_F_NO_SCHED)) {
+	if (!(set->flags &
+	      (BLK_MQ_F_NO_SCHED | BLK_MQ_F_NO_SCHED_BY_DEFAULT))) {
 		int ret;
 
 		ret = blk_mq_sched_init(q);
