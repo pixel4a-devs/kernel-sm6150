@@ -36,7 +36,6 @@
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/secure_buffer.h>
 #include <linux/soc/qcom/smem.h>
-#include <linux/kthread.h>
 #include <soc/qcom/boot_stats.h>
 
 #include <linux/uaccess.h>
@@ -520,10 +519,14 @@ int pil_do_ramdump(struct pil_desc *desc,
 			    MD_SS_ENCR_DONE) {
 				pr_debug("Dumping Minidump for %s\n",
 					desc->name);
-				return pil_do_minidump(desc, minidump_dev);
-			}
-			pr_debug("Minidump aborted for %s\n", desc->name);
-			return -EINVAL;
+				ret = pil_do_minidump(desc, minidump_dev);
+				if (ret) {
+					pr_debug("pil_do_minidump failed %d\n",
+							ret);
+				}
+			} else
+				pr_debug("Minidump aborted for %s\n",
+						desc->name);
 		}
 	}
 	pr_debug("Continuing with full SSR dump for %s\n", desc->name);
@@ -1073,17 +1076,15 @@ static int pil_load_seg(struct pil_desc *desc, struct pil_seg *seg)
 		if (ret) {
 			pil_err(desc, "Failed to locate blob %s or blob is too big(rc:%d)\n",
 				fw_name, ret);
-			return ret;
+			goto out;
 		}
 
 		if (fw->size != seg->filesz) {
 			pil_err(desc, "Blob size %u doesn't match %lu\n",
 					ret, seg->filesz);
-			release_firmware(fw);
-			return -EPERM;
+			ret = -EPERM;
+			goto release_fw;
 		}
-
-		release_firmware(fw);
 	}
 
 	/* Zero out trailing memory */
@@ -1097,7 +1098,8 @@ static int pil_load_seg(struct pil_desc *desc, struct pil_seg *seg)
 		buf = desc->map_fw_mem(paddr, size, map_data);
 		if (!buf) {
 			pil_err(desc, "Failed to map memory\n");
-			return -ENOMEM;
+			ret = -ENOMEM;
+			goto release_fw;
 		}
 		pil_memset_io(buf, 0, size);
 
@@ -1114,6 +1116,10 @@ static int pil_load_seg(struct pil_desc *desc, struct pil_seg *seg)
 								num, ret);
 	}
 
+release_fw:
+	if (fw)
+		release_firmware(fw);
+out:
 	return ret;
 }
 
@@ -1260,9 +1266,9 @@ int pil_boot(struct pil_desc *desc)
 {
 	int ret;
 	char fw_name[30];
-	struct pil_seg *seg;
 	const struct pil_mdt *mdt;
 	const struct elf32_hdr *ehdr;
+	struct pil_seg *seg;
 	const struct firmware *fw;
 	struct pil_priv *priv = desc->priv;
 	bool mem_protect = false;

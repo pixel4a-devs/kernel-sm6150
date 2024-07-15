@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 KASAN_SANITIZE_scm.o := n
+# TODO(b/142390482) disabling KASAN for qmi_encdec due to
+# use-after-free bug on camera launch.
+# Remove the next line once the bug is fixed.
+KASAN_SANITIZE_qmi_encdec.o := n
 obj-$(CONFIG_QCOM_CPUSS_DUMP) += cpuss_dump.o
 obj-$(CONFIG_QCOM_GLINK_SSR) +=	glink_ssr.o
 obj-$(CONFIG_QCOM_GSBI)	+=	qcom_gsbi.o
@@ -110,16 +114,14 @@ obj-$(CONFIG_QCOM_SMP2P_SLEEPSTATE) += smp2p_sleepstate.o
 obj-$(CONFIG_QCOM_MEM_OFFLINE) += mem-offline.o
 obj-$(CONFIG_QCOM_CDSP_RM) += cdsprm.o
 obj-$(CONFIG_QCOM_CX_IPEAK) += cx_ipeak.o
+obj-$(CONFIG_MODEMSMEM) += modemsmem/
 obj-$(CONFIG_QCOM_AOP_DDR_MESSAGING) += aop_ddr_msgs.o
 obj-$(CONFIG_MSM_HAB) += hab/
 obj-$(CONFIG_QCOM_HGSL) += hgsl/
 obj-$(CONFIG_QCOM_HYP_CORE_CTL) += hyp_core_ctl.o
 obj-$(CONFIG_QCOM_AOP_DDRSS_COMMANDS) += aop_ddrss_cmds.o
+obj-$(CONFIG_MODEMSMEM) += modemsmem/
 obj-$(CONFIG_RMNET_CTL) += rmnet_ctl/
 obj-$(CONFIG_QCOM_ADSP_MANUAL_VOTE) += adsp_vote_qmi.o adsp_lpm_voting_v01.o
 obj-$(CONFIG_CPU_V7) += idle-v7.o
 obj-$(CONFIG_MSM_BAM_DMUX) += bam_dmux.o
-obj-$(CONFIG_WCNSS_CORE) += wcnss/
-obj-$(CONFIG_RENAME_BLOCK_DEVICE) += rename_block_device.o
-obj-$(CONFIG_QTI_CRYPTO_COMMON) += crypto-qti-common.o
-obj-$(CONFIG_QTI_CRYPTO_TZ) += crypto-qti-tz.o

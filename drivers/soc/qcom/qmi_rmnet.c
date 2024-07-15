@@ -25,6 +25,7 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/alarmtimer.h>
+#include <linux/icmpv6.h>
 
 #define NLMSG_FLOW_ACTIVATE 1
 #define NLMSG_FLOW_DEACTIVATE 2
@@ -604,6 +605,17 @@ struct rmnet_bearer_map *qmi_rmnet_get_bearer_noref(struct qos_info *qos_info,
 }
 
 #else
+static inline void qmi_rmnet_clean_flow_list(struct qos_info *qos)
+{
+	struct rmnet_bearer_map *bearer;
+
+	bearer = __qmi_rmnet_bearer_get(qos_info, bearer_id);
+	if (bearer)
+		bearer->flow_ref--;
+
+	return bearer;
+}
+
 static inline void
 qmi_rmnet_update_flow_map(struct rmnet_flow_map *itm,
 			  struct rmnet_flow_map *new_map)
