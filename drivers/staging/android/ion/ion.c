@@ -40,6 +40,7 @@
 #include <linux/sched/task.h>
 #include <linux/bitops.h>
 #include <linux/msm_dma_iommu_mapping.h>
+#include <trace/events/kmem.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/ion.h>
 #include <soc/qcom/secure_buffer.h>
@@ -172,6 +173,9 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 	mutex_lock(&dev->buffer_lock);
 	ion_buffer_add(dev, buffer);
 	mutex_unlock(&dev->buffer_lock);
+	trace_ion_buffer_create(buffer->sg_table, buffer->size);
+	trace_ion_heap_grow(heap->name, len,
+			    atomic_long_read(&heap->total_allocated));
 	atomic_long_add(len, &heap->total_allocated);
 	atomic_long_add(len, &total_heap_bytes);
 	return buffer;
@@ -189,6 +193,10 @@ void ion_buffer_destroy(struct ion_buffer *buffer)
 		pr_warn_ratelimited("ION client likely missing a call to dma_buf_kunmap or dma_buf_vunmap\n");
 		buffer->heap->ops->unmap_kernel(buffer->heap, buffer);
 	}
+
+	trace_ion_buffer_destroy(buffer->sg_table, buffer->size);
+	trace_ion_heap_shrink(buffer->heap->name,  buffer->size,
+			      atomic_long_read(&buffer->heap->total_allocated));
 	buffer->heap->ops->free(buffer);
 	kfree(buffer);
 }
@@ -574,6 +582,7 @@ static void ion_dma_buf_kunmap(struct dma_buf *dmabuf, unsigned long offset,
 		ion_buffer_kmap_put(buffer);
 		mutex_unlock(&buffer->lock);
 	}
+
 }
 
 static int ion_sgl_sync_range(struct device *dev, struct scatterlist *sgl,
