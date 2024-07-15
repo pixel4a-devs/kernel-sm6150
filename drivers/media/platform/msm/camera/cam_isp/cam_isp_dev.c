@@ -1,5 +1,4 @@
 /* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,6 +29,32 @@
 
 static struct cam_isp_dev g_isp_dev;
 
+static void cam_isp_dev_stop_all_dev(
+	struct cam_node *node
+)
+{
+	int i = 0;
+	struct cam_hw_stop_args         stop_args;
+	struct cam_isp_stop_args        stop_isp;
+	struct cam_isp_context          *ctx_isp;
+	struct cam_context *ctx;
+
+	stop_isp.stop_only = false;
+	stop_isp.hw_stop_cmd = CAM_ISP_HW_STOP_IMMEDIATELY;
+
+	for (i = 0; i < node->ctx_size; i++) {
+		ctx = &(node->ctx_list[i]);
+		ctx_isp =
+		(struct cam_isp_context *) ctx->ctx_priv;
+
+		stop_args.ctxt_to_hw_map =  ctx_isp->hw_ctx;
+		stop_args.args = (void *)(&stop_isp);
+		node->hw_mgr_intf.hw_stop(
+			node->hw_mgr_intf.hw_mgr_priv,
+			&stop_args);
+	}
+}
+
 static void cam_isp_dev_iommu_fault_handler(
 	struct iommu_domain *domain, struct device *dev, unsigned long iova,
 	int flags, void *token, uint32_t buf_info)
@@ -43,6 +68,7 @@ static void cam_isp_dev_iommu_fault_handler(
 	}
 
 	node = (struct cam_node *)token;
+	cam_isp_dev_stop_all_dev(node);
 
 	for (i = 0; i < node->ctx_size; i++)
 		cam_context_dump_pf_info(&(node->ctx_list[i]), iova,
@@ -59,13 +85,9 @@ static const struct of_device_id cam_isp_dt_match[] = {
 static int cam_isp_subdev_open(struct v4l2_subdev *sd,
 	struct v4l2_subdev_fh *fh)
 {
-	cam_req_mgr_rwsem_read_op(CAM_SUBDEV_LOCK);
-
 	mutex_lock(&g_isp_dev.isp_mutex);
 	g_isp_dev.open_cnt++;
 	mutex_unlock(&g_isp_dev.isp_mutex);
-
-	cam_req_mgr_rwsem_read_op(CAM_SUBDEV_UNLOCK);
 
 	return 0;
 }

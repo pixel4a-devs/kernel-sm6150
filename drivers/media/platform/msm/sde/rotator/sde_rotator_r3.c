@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -3310,8 +3310,8 @@ static int sde_hw_rotator_wait4done(struct sde_rot_hw_resource *hw,
 		sde_hw_rotator_unmap_vaddr(&ctx->dst_dbgbuf);
 	}
 
-	/* Current rotator context job is finished, time to free up*/
 	sde_rot_mgr_lock(mgr);
+	/* Current rotator context job is finished, time to free up*/
 	sde_hw_rotator_free_rotctx(rot, ctx);
 	sde_rot_mgr_unlock(mgr);
 

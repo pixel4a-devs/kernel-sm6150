@@ -30,8 +30,6 @@
 #define OPERATING_FRAME_RATE_STEP (1 << 16)
 #define MAX_VP9D_INST_COUNT 6
 #define MAX_4K_MBPF 38736 /* (4096 * 2304 / 256) */
-#define NUM_MBS_720P (((1280 + 15) >> 4) * ((720 + 15) >> 4))
-#define MAX_5k_MBPF 64800 /*(5760 * 2880 / 256) */
 
 static const char *const mpeg_video_stream_format[] = {
 	"NAL Format Start Codes",
@@ -433,30 +431,17 @@ static u32 get_frame_size(struct msm_vidc_inst *inst,
 					const struct msm_vidc_format *fmt,
 					int fmt_type, int plane)
 {
-	u32 frame_size = 0, num_mbs = 0;
-	u32 max_mbps = 0;
+	u32 frame_size = 0;
 
 	if (fmt_type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		frame_size = fmt->get_frame_size(plane,
 					inst->capability.mbs_per_frame.max,
 					MB_SIZE_IN_PIXEL);
 		if (inst->flags & VIDC_SECURE) {
-			num_mbs = msm_vidc_get_mbs_per_frame(inst);
 			dprintk(VIDC_DBG,
-				"wxh= %dx%d num_mbs = %d max_mbpf = %d\n",
-				inst->prop.width[OUTPUT_PORT],
-				inst->prop.height[OUTPUT_PORT],
-				num_mbs, inst->capability.mbs_per_frame.max);
-
-			max_mbps = inst->capability.mbs_per_frame.max;
-			if (num_mbs < NUM_MBS_720P && max_mbps <= MAX_5k_MBPF)
-				frame_size = ALIGN(frame_size, SZ_4K);
-			else
-				frame_size = ALIGN(frame_size/2, SZ_4K);
-
-			dprintk(VIDC_DBG,
-					"Change secure input buffer size to %u\n",
-					frame_size);
+				"Change secure input buffer size from %u to %u\n",
+				frame_size, ALIGN(frame_size/2, SZ_4K));
+			frame_size = ALIGN(frame_size/2, SZ_4K);
 		}
 
 		if (inst->buffer_size_limit &&
@@ -557,7 +542,7 @@ struct msm_vidc_format vdec_formats[] = {
 		.type = OUTPUT_PORT,
 		.defer_outputs = true,
 		.input_min_count = 4,
-		.output_min_count = 9,
+		.output_min_count = 11,
 	},
 };
 
@@ -627,6 +612,15 @@ int msm_vdec_s_fmt(struct msm_vidc_inst *inst, struct v4l2_format *f)
 			inst->prop.height[CAPTURE_PORT] ==
 				f->fmt.pix_mp.height) {
 			dprintk(VIDC_DBG, "No change in CAPTURE port params\n");
+			if (msm_comm_get_stream_output_mode(inst) ==
+				HAL_VIDEO_DECODER_SECONDARY) {
+				dprintk(VIDC_DBG,
+					"Set opb color format %d\n",
+					f->fmt.pix_mp.pixelformat);
+				msm_comm_set_color_format(inst,
+					msm_comm_get_hal_output_buffer(inst),
+					f->fmt.pix_mp.pixelformat);
+			}
 			return 0;
 		}
 		memcpy(&inst->fmts[fmt->type], fmt,

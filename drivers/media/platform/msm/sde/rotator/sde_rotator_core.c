@@ -338,6 +338,7 @@ static int sde_rotator_footswitch_ctrl(struct sde_rot_mgr *mgr, bool on)
 	}
 
 	mgr->regulator_enable = on;
+
 	return 0;
 }
 
@@ -3298,6 +3299,7 @@ static void sde_rotator_suspend_cancel_rot_work(struct sde_rot_mgr *mgr)
 int sde_rotator_runtime_suspend(struct device *dev)
 {
 	struct sde_rot_mgr *mgr;
+	int rc = 0;
 
 	mgr = sde_rot_mgr_from_device(dev);
 
@@ -3312,10 +3314,12 @@ int sde_rotator_runtime_suspend(struct device *dev)
 		return -EBUSY;
 	}
 
-	sde_rotator_footswitch_ctrl(mgr, false);
-	ATRACE_END("runtime_active");
-	SDEROT_DBG("exit runtime_active\n");
-	return 0;
+	SDEROT_DBG("PM runtime suspend\n");
+	ATRACE_END("pm_runtime_active");
+	if (mgr->regulator_enable != false)
+		rc = sde_rotator_footswitch_ctrl(mgr, false);
+
+	return rc;
 }
 
 /*
@@ -3325,6 +3329,7 @@ int sde_rotator_runtime_suspend(struct device *dev)
 int sde_rotator_runtime_resume(struct device *dev)
 {
 	struct sde_rot_mgr *mgr;
+	int rc = 0;
 
 	mgr = sde_rot_mgr_from_device(dev);
 
@@ -3333,9 +3338,12 @@ int sde_rotator_runtime_resume(struct device *dev)
 		return -ENODEV;
 	}
 
-	SDEROT_DBG("begin runtime_active\n");
-	ATRACE_BEGIN("runtime_active");
-	return sde_rotator_footswitch_ctrl(mgr, true);
+	SDEROT_DBG("PM runtime resume\n");
+	ATRACE_BEGIN("pm_runtime_active");
+	if (mgr->regulator_enable != true)
+		rc = sde_rotator_footswitch_ctrl(mgr, true);
+
+	return rc;
 }
 
 /*
@@ -3354,7 +3362,7 @@ int sde_rotator_runtime_idle(struct device *dev)
 	}
 
 	/* add check for any busy status, if any */
-	SDEROT_DBG("idling ...\n");
+	SDEROT_DBG("PM runtime idle\n");
 	return 0;
 }
 
@@ -3378,7 +3386,7 @@ int sde_rotator_pm_suspend(struct device *dev)
 		return -ENODEV;
 	}
 
-
+	SDEROT_DBG("PM system suspend\n");
 	sde_rot_mgr_lock(mgr);
 	atomic_inc(&mgr->device_suspended);
 	sde_rotator_suspend_cancel_rot_work(mgr);
@@ -3419,19 +3427,19 @@ int sde_rotator_pm_resume(struct device *dev)
 	}
 
 	/*
-	 * It is possible that the runtime status of the device may
-	 * have been active when the system was suspended. Reset the runtime
-	 * status to suspended state after a complete system resume.
+	 * When exiting system sleep resume, set the state to active
+	 * to allow runtime resume to be executed next.
 	 */
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
 
+	SDEROT_DBG("PM system resume\n");
 	sde_rot_mgr_lock(mgr);
-	SDEROT_DBG("begin pm active %d clk_cnt %d\n",
+	SDEROT_DBG("begin pm system active %d clk_cnt %d\n",
 	 atomic_read(&mgr->device_suspended), mgr->pm_rot_enable_clk_cnt);
-	ATRACE_BEGIN("pm_active");
+	ATRACE_BEGIN("pm_system_active");
 	SDEROT_EVTLOG(mgr->pm_rot_enable_clk_cnt,
 			 atomic_read(&mgr->device_suspended));
 	atomic_dec(&mgr->device_suspended);
@@ -3460,6 +3468,8 @@ int sde_rotator_suspend(struct platform_device *dev, pm_message_t state)
 		return -ENODEV;
 	}
 
+	SDEROT_DBG("PM only suspend\n");
+
 	sde_rot_mgr_lock(mgr);
 	atomic_inc(&mgr->device_suspended);
 	sde_rotator_suspend_cancel_rot_work(mgr);
@@ -3478,6 +3488,8 @@ int sde_rotator_resume(struct platform_device *dev)
 		SDEROT_ERR("null parameters\n");
 		return -ENODEV;
 	}
+
+	SDEROT_DBG("PM only resume\n");
 
 	sde_rot_mgr_lock(mgr);
 	atomic_dec(&mgr->device_suspended);

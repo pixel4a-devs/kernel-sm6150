@@ -1,5 +1,4 @@
 /* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -20,6 +19,47 @@
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
 
+
+#ifdef CONFIG_CAMERA_FW_UPDATE
+#include "../cam_fw_update/fw_update.h"
+#endif
+
+static ssize_t ois_fw_ver_show(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+	int rc;
+	struct cam_sensor_ctrl_t *ctrl = dev_get_drvdata(dev);
+
+	mutex_lock(&ctrl->cam_sensor_mutex);
+	rc = scnprintf(buf, PAGE_SIZE, "%d\n", ctrl->ois_fw_ver);
+	mutex_unlock(&ctrl->cam_sensor_mutex);
+	return rc;
+}
+
+static ssize_t vcm_fw_ver_show(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+	int rc;
+	struct cam_sensor_ctrl_t *ctrl = dev_get_drvdata(dev);
+
+	mutex_lock(&ctrl->cam_sensor_mutex);
+	rc = scnprintf(buf, PAGE_SIZE, "%d\n", ctrl->vcm_fw_ver);
+	mutex_unlock(&ctrl->cam_sensor_mutex);
+	return rc;
+}
+
+static DEVICE_ATTR_RO(ois_fw_ver);
+static DEVICE_ATTR_RO(vcm_fw_ver);
+
+static struct attribute *sensor_fw_dev_attrs[] = {
+	&dev_attr_ois_fw_ver.attr,
+	&dev_attr_vcm_fw_ver.attr,
+	NULL
+};
+
+ATTRIBUTE_GROUPS(sensor_fw_dev);
 
 static void cam_sensor_update_req_mgr(
 	struct cam_sensor_ctrl_t *s_ctrl,
@@ -85,6 +125,84 @@ static void cam_sensor_release_per_frame_resource(
 			}
 		}
 	}
+}
+
+static int32_t cam_sensor_read_reg(
+	struct cam_sensor_ctrl_t *s_ctrl,
+	struct cam_packet *csl_packet)
+{
+	int32_t rc = 0;
+	uint8_t buf[8] = { 0 };
+	uint32_t addr = 0;
+	int32_t num_bytes = 0;
+	uint32_t total_cmd_buf_in_bytes = 0;
+	uintptr_t generic_ptr;
+	struct cam_cmd_buf_desc *cmd_desc = NULL;
+	size_t len_of_buff = 0;
+	uint32_t *offset = NULL;
+	struct cam_cmd_get_sensor_data *cmd_get_sensor = NULL;
+
+	if (csl_packet->num_cmd_buf != 1) {
+		CAM_ERR(CAM_SENSOR,
+			"More than one cmd buf found in sensor read");
+		return -EINVAL;
+	}
+
+	offset = (uint32_t *)&csl_packet->payload;
+	offset += csl_packet->cmd_buf_offset / sizeof(uint32_t);
+	cmd_desc = (struct cam_cmd_buf_desc *)(offset);
+	total_cmd_buf_in_bytes = cmd_desc->length;
+	if (!total_cmd_buf_in_bytes) {
+		CAM_ERR(CAM_SENSOR,
+			"Empty cmd buf found in sensor read");
+		return -EINVAL;
+	}
+
+	// To keep the pointer of reg_data
+	rc = cam_mem_get_cpu_buf(cmd_desc->mem_handle,
+		&generic_ptr, &len_of_buff);
+	if (rc < 0) {
+		CAM_ERR(CAM_SENSOR, "Failed to get cpu buf");
+		return rc;
+	}
+	if (!generic_ptr) {
+		CAM_ERR(CAM_SENSOR, "invalid generic_ptr");
+		return -EINVAL;
+	}
+	offset = (uint32_t *)((uint8_t *)generic_ptr +
+		cmd_desc->offset);
+	cmd_get_sensor = (struct cam_cmd_get_sensor_data *)offset;
+
+	addr = cmd_get_sensor->reg_addr;
+	num_bytes = cmd_get_sensor->reg_data;
+	if (addr <= 0 || addr > 0xFFFF) {
+		CAM_ERR(CAM_SENSOR,
+			"Invalid addr while read Sensor data: %x", addr);
+		return -EINVAL;
+	}
+
+	if (num_bytes <= 0 || num_bytes > 8) {
+		CAM_ERR(CAM_SENSOR,
+			"Invalid read size while read Sensor data: %d",
+			num_bytes);
+		return -EINVAL;
+	}
+
+	rc = camera_io_dev_read_seq(&s_ctrl->io_master_info,
+		addr, buf, CAMERA_SENSOR_I2C_TYPE_WORD,
+		CAMERA_SENSOR_I2C_TYPE_WORD, num_bytes);
+
+	if (rc) {
+		CAM_ERR(CAM_SENSOR, "camera_io_dev_read_seq failed!");
+		return rc;
+	}
+
+	if (copy_to_user((void __user *) cmd_get_sensor->query_data_handle,
+		buf, num_bytes)) {
+		CAM_ERR(CAM_SENSOR, "sensor_read_reg: copy to user failed!");
+	}
+
+	return rc;
 }
 
 static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
@@ -225,6 +343,10 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 		break;
 	}
+	case CAM_SENSOR_PACKET_OPCODE_SENSOR_READREG: {
+		rc = cam_sensor_read_reg(s_ctrl, csl_packet);
+		return rc;
+	}
 	case CAM_SENSOR_PACKET_OPCODE_SENSOR_NOP: {
 		if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) ||
 			(s_ctrl->sensor_state == CAM_SENSOR_ACQUIRE)) {
@@ -323,6 +445,25 @@ static int32_t cam_sensor_i2c_modes_util(
 				return rc;
 			}
 		}
+	} else if (i2c_list->op_code == CAM_SENSOR_I2C_READ) {
+		size = i2c_list->i2c_settings.size;
+		for (i = 0; i < size; i++) {
+			rc = camera_io_dev_read(
+			io_master_info,
+			i2c_list->i2c_settings.reg_setting[i].reg_addr,
+			&(i2c_list->i2c_settings.reg_setting[i].reg_data),
+			i2c_list->i2c_settings.addr_type,
+			i2c_list->i2c_settings.data_type);
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR,
+					"i2c read Fail: %d", rc);
+				return rc;
+			}
+			CAM_INFO(CAM_SENSOR,
+				"i2c read addr: 0x%x, data: 0x%x",
+				i2c_list->i2c_settings.reg_setting[i].reg_addr,
+				i2c_list->i2c_settings.reg_setting[i].reg_data);
+		}
 	}
 
 	return rc;
@@ -370,6 +511,7 @@ int32_t cam_sensor_update_slave_info(struct cam_cmd_probe *probe_info,
 	/* Userspace passes the pipeline delay in reserved field */
 	s_ctrl->pipeline_delay =
 		probe_info->reserved;
+	s_ctrl->fw_update_flag = probe_info->fw_update_flag;
 
 	s_ctrl->sensor_probe_addr_type =  probe_info->addr_type;
 	s_ctrl->sensor_probe_data_type =  probe_info->data_type;
@@ -735,6 +877,33 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			s_ctrl->sensordata->slave_info.sensor_slave_addr,
 			s_ctrl->sensordata->slave_info.sensor_id);
 
+#ifdef CONFIG_CAMERA_FW_UPDATE
+		if (s_ctrl->fw_update_flag & (1 << 0)) {
+			CAM_INFO(CAM_SENSOR, "[OISFW]Check OIS FW update");
+			rc = checkOISFWUpdate(s_ctrl);
+		}
+
+		if (s_ctrl->fw_update_flag & (1 << 1)) {
+			CAM_INFO(CAM_SENSOR, "[VCMFW]Check temperature params");
+			rc = checkRearVCMFWUpdate_temp(s_ctrl);
+		}
+#endif
+
+		if (s_ctrl->ois_fw_ver == 0 || s_ctrl->vcm_fw_ver == 0) {
+			rc = getFWVersion(s_ctrl);
+			if (rc >= 0) {
+				dev_set_drvdata(&s_ctrl->pdev->dev, s_ctrl);
+				rc = sysfs_create_groups(
+					&s_ctrl->pdev->dev.kobj,
+					sensor_fw_dev_groups);
+				if (rc < 0) {
+					CAM_ERR(CAM_SENSOR,
+						"failed to create sysfs");
+					goto free_power_settings;
+				}
+			}
+		}
+
 		rc = cam_sensor_power_down(s_ctrl);
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR, "fail in Sensor Power Down");
@@ -782,11 +951,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		bridge_params.dev_id = CAM_SENSOR;
 		sensor_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
-		if (sensor_acq_dev.device_handle <= 0) {
-			rc = -EFAULT;
-			CAM_ERR(CAM_SENSOR, "Can not create device handle");
-			goto release_mutex;
-		}
 		s_ctrl->bridge_intf.device_hdl = sensor_acq_dev.device_handle;
 		s_ctrl->bridge_intf.session_hdl = sensor_acq_dev.session_handle;
 

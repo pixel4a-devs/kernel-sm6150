@@ -383,6 +383,7 @@ static int cam_cci_platform_probe(struct platform_device *pdev)
 
 	soc_info = &new_cci_dev->soc_info;
 
+	mutex_init(&new_cci_dev->mutex);
 	new_cci_dev->v4l2_dev_str.pdev = pdev;
 
 	soc_info->pdev = pdev;
@@ -424,7 +425,6 @@ static int cam_cci_platform_probe(struct platform_device *pdev)
 	}
 
 	g_cci_subdev[soc_info->index] = &new_cci_dev->v4l2_dev_str.sd;
-	mutex_init(&(new_cci_dev->init_mutex));
 	CAM_INFO(CAM_CCI, "Device Type :%d", soc_info->index);
 
 	cam_register_subdev_fops(&cci_v4l2_subdev_fops);
@@ -442,16 +442,15 @@ static int cam_cci_platform_probe(struct platform_device *pdev)
 	rc = cam_cpas_register_client(&cpas_parms);
 	if (rc) {
 		CAM_ERR(CAM_CCI, "CPAS registration failed");
-		goto cci_unregister_subdev;
+		goto cci_no_resource;
 	}
 	CAM_DBG(CAM_CCI, "CPAS registration successful handle=%d",
 		cpas_parms.client_handle);
 	new_cci_dev->cpas_handle = cpas_parms.client_handle;
 
 	return rc;
-cci_unregister_subdev:
-	cam_unregister_subdev(&(new_cci_dev->v4l2_dev_str));
 cci_no_resource:
+	mutex_destroy(&new_cci_dev->mutex);
 	kfree(new_cci_dev);
 	return rc;
 }
@@ -464,6 +463,7 @@ static int cam_cci_device_remove(struct platform_device *pdev)
 
 	cam_cpas_unregister_client(cci_dev->cpas_handle);
 	cam_cci_soc_remove(pdev, cci_dev);
+	mutex_destroy(&cci_dev->mutex);
 	devm_kfree(&pdev->dev, cci_dev);
 	return 0;
 }
