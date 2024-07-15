@@ -325,6 +325,9 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 
 	dwc3_gadget_del_and_unmap_request(dep, req, status);
 
+	if (!dep->endpoint.desc)
+		return;
+
 	if (usb_endpoint_xfer_isoc(dep->endpoint.desc)) {
 		if (list_empty(&dep->started_list)) {
 			dep->flags |= DWC3_EP_PENDING_REQUEST;
@@ -3957,10 +3960,11 @@ static irqreturn_t dwc3_check_event_buf(struct dwc3_event_buffer *evt)
 	u32 reg;
 	ktime_t start_time;
 
-	if (!evt)
+	if(!evt)
 		return IRQ_NONE;
 
 	dwc = evt->dwc;
+
 	start_time = ktime_get();
 	dwc->irq_cnt++;
 
@@ -4125,7 +4129,6 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->gadget.speed               = USB_SPEED_UNKNOWN;
 	dwc->gadget.sg_supported        = true;
 	dwc->gadget.name                = "dwc3-gadget";
-	dwc->gadget.is_otg              = dwc->dr_mode == USB_DR_MODE_OTG;
 
 	/*
 	 * FIXME We might be setting max_speed to <SUPER, however versions

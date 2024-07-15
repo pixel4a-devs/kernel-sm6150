@@ -55,6 +55,7 @@
 #include "dbm.h"
 #include "debug.h"
 #include "xhci.h"
+#include "../pd/usbpd.h"
 
 #define SDP_CONNETION_CHECK_TIME 10000 /* in ms */
 
@@ -337,13 +338,14 @@ struct dwc3_msm {
 	struct notifier_block	dpdm_nb;
 	struct regulator	*dpdm_reg;
 
+	u32 auto_vbus_src_sel_threshold;
 	u64			dummy_gsi_db;
 	dma_addr_t		dummy_gsi_db_dma;
 
 	struct device_node *dwc3_node;
 	struct property *num_gsi_eps;
 	bool			dual_port;
-	bool			usb_data_enabled;
+	bool usb_data_enabled;
 };
 
 #define USB_HSPHY_3P3_VOL_MIN		3050000 /* uV */
@@ -3839,6 +3841,55 @@ static ssize_t bus_vote_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(bus_vote);
 
+static int dwc_dpdm_cb(struct notifier_block *nb, unsigned long evt, void *p)
+{
+	struct dwc3_msm *mdwc = container_of(nb, struct dwc3_msm, dpdm_nb);
+
+	switch (evt) {
+	case REGULATOR_EVENT_ENABLE:
+		dev_dbg(mdwc->dev, "%s: enable state:%s\n", __func__,
+				dwc3_drd_state_string(mdwc->drd_state));
+		break;
+	case REGULATOR_EVENT_DISABLE:
+		dev_dbg(mdwc->dev, "%s: disable state:%s\n", __func__,
+				dwc3_drd_state_string(mdwc->drd_state));
+		if (mdwc->drd_state == DRD_STATE_UNDEFINED)
+			queue_delayed_work(mdwc->sm_usb_wq, &mdwc->sm_work, 0);
+		break;
+	default:
+		dev_dbg(mdwc->dev, "%s: unknown event state:%s\n", __func__,
+				dwc3_drd_state_string(mdwc->drd_state));
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+static ssize_t auto_vbus_src_sel_threshold_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+		mdwc->auto_vbus_src_sel_threshold);
+}
+
+static ssize_t auto_vbus_src_sel_threshold_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int ret = 0;
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+
+
+	ret = kstrtou32(buf, 10, &mdwc->auto_vbus_src_sel_threshold);
+
+	if (ret)
+		return ret;
+
+	return count;
+}
+static DEVICE_ATTR_RW(auto_vbus_src_sel_threshold);
+
 static ssize_t usb_data_enabled_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
@@ -3866,30 +3917,6 @@ static ssize_t usb_data_enabled_store(struct device *dev,
 	return count;
 }
 static DEVICE_ATTR_RW(usb_data_enabled);
-
-static int dwc_dpdm_cb(struct notifier_block *nb, unsigned long evt, void *p)
-{
-	struct dwc3_msm *mdwc = container_of(nb, struct dwc3_msm, dpdm_nb);
-
-	switch (evt) {
-	case REGULATOR_EVENT_ENABLE:
-		dev_dbg(mdwc->dev, "%s: enable state:%s\n", __func__,
-				dwc3_drd_state_string(mdwc->drd_state));
-		break;
-	case REGULATOR_EVENT_DISABLE:
-		dev_dbg(mdwc->dev, "%s: disable state:%s\n", __func__,
-				dwc3_drd_state_string(mdwc->drd_state));
-		if (mdwc->drd_state == DRD_STATE_UNDEFINED)
-			queue_delayed_work(mdwc->sm_usb_wq, &mdwc->sm_work, 0);
-		break;
-	default:
-		dev_dbg(mdwc->dev, "%s: unknown event state:%s\n", __func__,
-				dwc3_drd_state_string(mdwc->drd_state));
-		break;
-	}
-
-	return NOTIFY_OK;
-}
 
 static int dwc3_msm_populate_gsi_params(struct dwc3_msm *mdwc)
 {
@@ -4003,6 +4030,14 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	mdwc->charging_disabled = of_property_read_bool(node,
 				"qcom,charging-disabled");
 	mdwc->dual_port = of_property_read_bool(node, "qcom,dual-port");
+
+	ret = of_property_read_u32(node, "google,switch-vbus",
+				   &mdwc->auto_vbus_src_sel_threshold);
+	if (ret) {
+		dev_dbg(&pdev->dev,
+			"setting auto_vbus_src_sel_threshold to zero.\n");
+		mdwc->auto_vbus_src_sel_threshold = 0;
+	}
 
 	ret = of_property_read_u32(node, "qcom,lpm-to-suspend-delay-ms",
 				&mdwc->lpm_to_suspend_delay);
@@ -4348,6 +4383,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	device_create_file(&pdev->dev, &dev_attr_speed);
 	device_create_file(&pdev->dev, &dev_attr_usb_compliance_mode);
 	device_create_file(&pdev->dev, &dev_attr_bus_vote);
+	device_create_file(&pdev->dev, &dev_attr_auto_vbus_src_sel_threshold);
 	device_create_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	return 0;
@@ -4385,12 +4421,14 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 	int ret_pm;
 
 	device_remove_file(&pdev->dev, &dev_attr_mode);
-	device_remove_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	if (mdwc->dpdm_nb.notifier_call) {
 		regulator_unregister_notifier(mdwc->dpdm_reg, &mdwc->dpdm_nb);
 		mdwc->dpdm_nb.notifier_call = NULL;
 	}
+
+	device_remove_file(&pdev->dev, &dev_attr_auto_vbus_src_sel_threshold);
+	device_create_file(&pdev->dev, &dev_attr_usb_data_enabled);
 
 	if (mdwc->usb_psy)
 		power_supply_put(mdwc->usb_psy);
@@ -4479,6 +4517,50 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static bool dwc3_is_root_hub_direct_child(struct usb_device *udev,
+					  struct dwc3 *dwc)
+{
+	return udev->parent &&
+	       !udev->parent->parent &&
+	       udev->dev.parent->parent == &dwc->xhci->dev;
+}
+
+static bool dwc3_use_external_vbus_booster(struct usb_device *udev,
+					   struct dwc3 *dwc,
+					   struct dwc3_msm *mdwc)
+{
+	unsigned max_power;
+
+	if (!udev->actconfig)
+		return false;
+
+	if (udev->speed >= USB_SPEED_SUPER)
+		max_power = udev->actconfig->desc.bMaxPower * 8;
+	else
+		max_power = udev->actconfig->desc.bMaxPower * 2;
+
+	if (dwc3_is_root_hub_direct_child(udev, dwc) &&
+	    udev->descriptor.bDeviceClass != USB_CLASS_HUB &&
+	    max_power < mdwc->auto_vbus_src_sel_threshold)
+		return true;
+
+	return false;
+}
+
+static BLOCKING_NOTIFIER_HEAD(ext_vbus_notifier_list);
+
+void ext_vbus_register_notify(struct notifier_block *nb)
+{
+	blocking_notifier_chain_register(&ext_vbus_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(ext_vbus_register_notify);
+
+void ext_vbus_unregister_notify(struct notifier_block *nb)
+{
+	blocking_notifier_chain_unregister(&ext_vbus_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(ext_vbus_unregister_notify);
+
 static int dwc3_msm_host_notifier(struct notifier_block *nb,
 	unsigned long event, void *ptr)
 {
@@ -4506,8 +4588,7 @@ static int dwc3_msm_host_notifier(struct notifier_block *nb,
 	 * i.e. dwc -> xhci -> root_hub -> udev
 	 * root_hub's udev->parent==NULL, so traverse struct device hierarchy
 	 */
-	if (udev->parent && !udev->parent->parent &&
-			udev->dev.parent->parent == &dwc->xhci->dev) {
+	if (dwc3_is_root_hub_direct_child(udev, dwc)) {
 		if (event == USB_DEVICE_ADD && udev->actconfig) {
 			if (!dwc3_msm_is_ss_rhport_connected(mdwc)) {
 				/*
@@ -4543,6 +4624,16 @@ static int dwc3_msm_host_notifier(struct notifier_block *nb,
 			mdwc->max_rh_port_speed = USB_SPEED_UNKNOWN;
 			dwc3_msm_update_bus_bw(mdwc, mdwc->default_bus_vote);
 		}
+	}
+
+	if (mdwc->auto_vbus_src_sel_threshold) {
+		if (event == USB_DEVICE_ADD &&
+		    dwc3_use_external_vbus_booster(udev, dwc, mdwc))
+			blocking_notifier_call_chain(&ext_vbus_notifier_list,
+						     EXT_VBUS_ON, NULL);
+		else
+			blocking_notifier_call_chain(&ext_vbus_notifier_list,
+						     EXT_VBUS_OFF, NULL);
 	}
 
 	return NOTIFY_DONE;
@@ -5392,6 +5483,7 @@ static struct platform_driver dwc3_msm_driver = {
 		.name	= "msm-dwc3",
 		.pm	= &dwc3_msm_dev_pm_ops,
 		.of_match_table	= of_dwc3_matach,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 

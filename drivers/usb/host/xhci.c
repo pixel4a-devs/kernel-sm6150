@@ -39,6 +39,13 @@
 
 #define	PORT_WAKE_BITS	(PORT_WKOC_E | PORT_WKDISC_E | PORT_WKCONN_E)
 
+#ifdef CONFIG_USB_XHCI_REPLACE_POLICY
+#define GFP_POLICY GFP_KERNEL
+static bool realloc;
+#else
+#define GFP_POLICY GFP_NOIO
+#endif
+
 /* Some 0.95 hardware can't handle the chain bit on a Link TRB being cleared */
 static int link_quirk;
 module_param(link_quirk, int, S_IRUGO | S_IWUSR);
@@ -68,12 +75,12 @@ static bool td_on_ring(struct xhci_td *td, struct xhci_ring *ring)
  * @ptr: address of hc register to be read
  * @mask: bits to look at in result of read
  * @done: value of those bits when handshake succeeds
- * @timeout_us: timeout in microseconds
+ * @usec: timeout in microseconds
  *
  * Returns negative errno, or zero on success
  *
  * Success happens when the "mask" bits have the specified value (hardware
- * handshake done).  There are two failure modes:  "timeout_us" have passed (major
+ * handshake done).  There are two failure modes:  "usec" have passed (major
  * hardware flakeout), or the register reads as all-ones (hardware removed).
  */
 int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, u64 timeout_us)
@@ -92,7 +99,7 @@ int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, u64 timeout_us)
 }
 
 int xhci_handshake_check_state(struct xhci_hcd *xhci,
-		void __iomem *ptr, u32 mask, u32 done, u64 timeout_us)
+		void __iomem *ptr, u32 mask, u32 done, int usec)
 {
 	u32	result;
 
@@ -107,8 +114,8 @@ int xhci_handshake_check_state(struct xhci_hcd *xhci,
 		if (result == done)
 			return 0;
 		udelay(1);
-		timeout_us--;
-	} while (timeout_us > 0);
+		usec--;
+	} while (usec > 0);
 	return -ETIMEDOUT;
 }
 
@@ -238,7 +245,7 @@ int xhci_reset(struct xhci_hcd *xhci, u64 timeout_us)
 		udelay(1000);
 
 	ret = xhci_handshake_check_state(xhci, &xhci->op_regs->command,
-			CMD_RESET, 0, timeout_us);
+			CMD_RESET, 0, 10 * 1000 * 1000);
 	if (ret)
 		return ret;
 
@@ -1860,7 +1867,10 @@ static int xhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev,
 	 * process context, not interrupt context (or so documenation
 	 * for usb_set_interface() and usb_set_configuration() claim).
 	 */
-	if (xhci_endpoint_init(xhci, virt_dev, udev, ep, GFP_NOIO) < 0) {
+	/* Note: using GFP_NOIO may fail to get memory if CMA
+	 * doesn't have enough resource.
+	 */
+	if (xhci_endpoint_init(xhci, virt_dev, udev, ep, GFP_POLICY) < 0) {
 		dev_dbg(&udev->dev, "%s - could not initialize ep %#x\n",
 				__func__, ep->desc.bEndpointAddress);
 		return -ENOMEM;
@@ -3539,7 +3549,13 @@ static int xhci_discover_or_reset_device(struct usb_hcd *hcd,
 	if (!virt_dev) {
 		xhci_dbg(xhci, "The device to be reset with slot ID %u does "
 				"not exist. Re-allocate the device\n", slot_id);
+#ifdef CONFIG_USB_XHCI_REPLACE_POLICY
+		realloc = true;
+#endif
 		ret = xhci_alloc_dev(hcd, udev);
+#ifdef CONFIG_USB_XHCI_REPLACE_POLICY
+		realloc = false;
+#endif
 		if (ret == 1)
 			return 0;
 		else
@@ -3557,7 +3573,13 @@ static int xhci_discover_or_reset_device(struct usb_hcd *hcd,
 		xhci_dbg(xhci, "The device to be reset with slot ID %u does "
 				"not match the udev. Re-allocate the device\n",
 				slot_id);
+#ifdef CONFIG_USB_XHCI_REPLACE_POLICY
+		realloc = true;
+#endif
 		ret = xhci_alloc_dev(hcd, udev);
+#ifdef CONFIG_USB_XHCI_REPLACE_POLICY
+		realloc = false;
+#endif
 		if (ret == 1)
 			return 0;
 		else
@@ -3838,10 +3860,21 @@ int xhci_alloc_dev(struct usb_hcd *hcd, struct usb_device *udev)
 	 * xhci_discover_or_reset_device(), which may be called as part of
 	 * mass storage driver error handling.
 	 */
+	/* Note: using GFP_NOIO may fail to get memory if CMA
+	 * doesn't have enough resource.
+	 */
+#ifdef CONFIG_USB_XHCI_REPLACE_POLICY
+	if (!xhci_alloc_virt_device(xhci, slot_id, udev,
+				    realloc ? GFP_NOIO : GFP_POLICY)) {
+		xhci_warn(xhci, "Could not allocate xHCI USB device data structures\n");
+		goto disable_slot;
+	}
+#else
 	if (!xhci_alloc_virt_device(xhci, slot_id, udev, GFP_NOIO)) {
 		xhci_warn(xhci, "Could not allocate xHCI USB device data structures\n");
 		goto disable_slot;
 	}
+#endif
 	vdev = xhci->devs[slot_id];
 	slot_ctx = xhci_get_slot_ctx(xhci, vdev->out_ctx);
 	trace_xhci_alloc_dev(slot_ctx);

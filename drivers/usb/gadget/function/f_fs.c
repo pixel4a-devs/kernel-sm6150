@@ -1678,13 +1678,8 @@ ffs_fs_mount(struct file_system_type *t, int flags,
 		return ERR_PTR(ret);
 
 	ffs = ffs_data_new(dev_name);
-	if (IS_ERR_OR_NULL(ffs)) {
-		if (!ffs)
-			return ERR_PTR(-ENOMEM);
-		else
-			return ERR_PTR((long) ffs);
-	}
-
+	if (unlikely(!ffs))
+		return ERR_PTR(-ENOMEM);
 	ffs->file_perms = data.perms;
 	ffs->no_disconnect = data.no_disconnect;
 
@@ -2087,10 +2082,10 @@ static void ffs_func_eps_disable(struct ffs_function *func)
 	unsigned long flags;
 
 	spin_lock_irqsave(&func->ffs->eps_lock, flags);
-	ffs = func->ffs;
+	count = func->ffs->eps_count;
+	epfile = func->ffs->epfiles;
 	ep = func->eps;
-	epfile = ffs->epfiles;
-	count = ffs->eps_count;
+	ffs = func->ffs;
 
 	ffs_log("enter: state %d setup_state %d flag %lu", func->ffs->state,
 		func->ffs->setup_state, func->ffs->flags);
