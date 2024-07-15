@@ -183,6 +183,7 @@ struct spi_geni_master {
 	void *ipc;
 	bool gsi_mode; /* GSI Mode */
 	bool dis_autosuspend;
+	bool pinctrl_sleep_at_probe;
 	bool cmd_done;
 	struct spi_geni_ssr spi_ssr;
 	bool set_miso_sampling;
@@ -699,11 +700,10 @@ static int setup_gsi_xfer(struct spi_transfer *xfer,
 	}
 
 	cs |= spi_slv->chip_select;
-	if (!xfer->cs_change) {
-		if (!list_is_last(&xfer->transfer_list,
-					&spi->cur_msg->transfers))
-			go_flags |= FRAGMENTATION;
-	}
+	if (!list_is_last(&xfer->transfer_list, &spi->cur_msg->transfers) ==
+	    !xfer->cs_change)
+		go_flags |= FRAGMENTATION;
+
 	go_tre = setup_go_tre(cmd, cs, rx_len, go_flags, mas);
 
 	sg_init_table(xfer_tx_sg, tx_nent);
@@ -891,17 +891,6 @@ static int spi_geni_prepare_transfer_hardware(struct spi_master *spi)
 
 	/* Adjust the IB based on the max speed of the slave.*/
 	rsc->ib = max_speed * DEFAULT_BUS_WIDTH;
-	if (mas->gsi_mode) {
-		struct se_geni_rsc *rsc;
-		int ret = 0;
-
-		rsc = &mas->spi_rsc;
-		ret = pinctrl_select_state(rsc->geni_pinctrl,
-						rsc->geni_gpio_active);
-		if (ret)
-			GENI_SE_ERR(mas->ipc, false, NULL,
-			"%s: Error %d pinctrl_select_state\n", __func__, ret);
-	}
 
 	ret = pm_runtime_get_sync(mas->dev);
 	if (ret < 0) {
@@ -917,6 +906,16 @@ static int spi_geni_prepare_transfer_hardware(struct spi_master *spi)
 		if (count <= 0)
 			GENI_SE_ERR(mas->ipc, false, NULL,
 				"resume usage count mismatch:%d", count);
+	}
+
+	if (mas->gsi_mode || mas->pinctrl_sleep_at_probe) {
+		int ret = 0;
+
+		ret = pinctrl_select_state(rsc->geni_pinctrl,
+						rsc->geni_gpio_active);
+		if (ret)
+			GENI_SE_ERR(mas->ipc, false, NULL,
+			"%s: Error %d pinctrl_select_state\n", __func__, ret);
 	}
 
 	if (spi->slave) {
@@ -1186,11 +1185,9 @@ static int setup_fifo_xfer(struct spi_transfer *xfer,
 		trans_len = (xfer->len / bytes_per_word) & TRANS_LEN_MSK;
 	}
 
-	if (!xfer->cs_change) {
-		if (!list_is_last(&xfer->transfer_list,
-					&spi->cur_msg->transfers))
-			m_param |= FRAGMENTATION;
-	}
+	if (!list_is_last(&xfer->transfer_list, &spi->cur_msg->transfers) ==
+	    !xfer->cs_change)
+		m_param |= FRAGMENTATION;
 
 	mas->cur_xfer = xfer;
 	if (m_cmd & SPI_TX_ONLY) {
@@ -1860,6 +1857,19 @@ static int spi_geni_probe(struct platform_device *pdev)
 	init_completion(&geni_mas->tx_cb);
 	init_completion(&geni_mas->rx_cb);
 	mutex_init(&geni_mas->spi_ssr.ssr_lock);
+
+	/* Set the pinctrl state to sleep.  Pinctrl will be set to active in
+	 * spi_geni_prepare_transfer_hardware.
+	 */
+	ret = pinctrl_select_state(rsc->geni_pinctrl, rsc->geni_gpio_sleep);
+	if (ret) {
+		dev_err(&pdev->dev, "pinctrl_select_state failed err:%d\n",
+				ret);
+		goto spi_geni_probe_unmap;
+	}
+
+	geni_mas->pinctrl_sleep_at_probe = true;
+
 	pm_runtime_set_suspended(&pdev->dev);
 	if (!geni_mas->dis_autosuspend) {
 		pm_runtime_set_autosuspend_delay(&pdev->dev,
@@ -1867,6 +1877,7 @@ static int spi_geni_probe(struct platform_device *pdev)
 		pm_runtime_use_autosuspend(&pdev->dev);
 	}
 	pm_runtime_enable(&pdev->dev);
+
 	ret = spi_register_master(spi);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to register SPI master\n");
