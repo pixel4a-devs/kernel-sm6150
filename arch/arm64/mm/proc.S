@@ -515,9 +515,7 @@ ENTRY(__cpu_setup)
 	bfi	x10, x9, #32, #3
 #ifdef CONFIG_ARM64_HW_AFDBM
 	/*
-	 * Enable hardware update of the Access Flags bit.
-	 * Hardware dirty bit management is enabled later,
-	 * via capabilities.
+	 * Hardware update of the Access and Dirty bits.
 	 */
 	mrs	x9, ID_AA64MMFR1_EL1
 	and	x9, x9, #0xf

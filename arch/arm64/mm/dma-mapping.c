@@ -30,7 +30,6 @@
 #include <linux/iommu.h>
 #include <linux/vmalloc.h>
 #include <linux/swiotlb.h>
-#include <linux/dma-removed.h>
 #include <linux/pci.h>
 #include <linux/io.h>
 
@@ -1082,12 +1081,8 @@ static void __iommu_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 			const struct iommu_ops *iommu, bool coherent)
 {
-	if (!dev->dma_ops) {
-		if (dev->removed_mem)
-			set_dma_ops(dev, &removed_dma_ops);
-		else
-			dev->dma_ops = &swiotlb_dma_ops;
-	}
+	if (!dev->dma_ops)
+		dev->dma_ops = &swiotlb_dma_ops;
 
 	dev->archdata.dma_coherent = coherent;
 	__iommu_setup_dma_ops(dev, dma_base, size, iommu);
@@ -1241,9 +1236,6 @@ static struct page **__iommu_alloc_buffer(struct device *dev, size_t size,
 	size_t array_size = count * sizeof(struct page *);
 	int i = 0;
 	bool is_coherent = is_dma_coherent(dev, attrs);
-	struct dma_iommu_mapping *mapping = dev->archdata.mapping;
-	unsigned int alloc_sizes = mapping->domain->pgsize_bitmap;
-	unsigned long order_mask;
 
 	if (array_size <= PAGE_SIZE)
 		pages = kzalloc(array_size, gfp);
@@ -1272,26 +1264,17 @@ static struct page **__iommu_alloc_buffer(struct device *dev, size_t size,
 	 * IOMMU can map any pages, so himem can also be used here
 	 */
 	gfp |= __GFP_NOWARN | __GFP_HIGHMEM;
-	order_mask = alloc_sizes >> PAGE_SHIFT;
-	order_mask &= (2U << MAX_ORDER) - 1;
-	if (!order_mask)
-		goto error;
 
 	while (count) {
-		int j, order;
-
-		order_mask &= (2U << __fls(count)) - 1;
-		order = __fls(order_mask);
+		int j, order = __fls(count);
 
 		pages[i] = alloc_pages(order ? (gfp | __GFP_NORETRY) &
 					~__GFP_RECLAIM : gfp, order);
 		while (!pages[i] && order) {
-			order_mask &= ~(1U << order);
-			order = __fls(order_mask);
+			order--;
 			pages[i] = alloc_pages(order ? (gfp | __GFP_NORETRY) &
 					~__GFP_RECLAIM : gfp, order);
 		}
-
 		if (!pages[i])
 			goto error;
 

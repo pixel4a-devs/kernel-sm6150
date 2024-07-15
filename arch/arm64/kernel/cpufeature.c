@@ -814,6 +814,13 @@ static bool has_no_hw_prefetch(const struct arm64_cpu_capabilities *entry, int _
 		MIDR_CPU_VAR_REV(1, MIDR_REVISION_MASK));
 }
 
+#ifdef CONFIG_ARM64_VHE
+static bool runs_at_el2(const struct arm64_cpu_capabilities *entry, int __unused)
+{
+	return is_kernel_in_hyp_mode();
+}
+#endif
+
 static bool hyp_offset_low(const struct arm64_cpu_capabilities *entry,
 			   int __unused)
 {
@@ -990,7 +997,7 @@ static bool cpu_can_use_dbm(const struct arm64_cpu_capabilities *cap)
 	return has_cpu_feature && !cpu_has_broken_dbm();
 }
 
-static void cpu_enable_hw_dbm(struct arm64_cpu_capabilities const *cap)
+static void cpu_enable_hw_dbm(const struct arm64_cpu_capabilities *cap)
 {
 	if (cpu_can_use_dbm(cap))
 		__cpu_enable_hw_dbm();
@@ -1028,11 +1035,6 @@ static bool has_hw_dbm(const struct arm64_cpu_capabilities *cap,
 #endif
 
 #ifdef CONFIG_ARM64_VHE
-static bool runs_at_el2(const struct arm64_cpu_capabilities *entry, int __unused)
-{
-	return is_kernel_in_hyp_mode();
-}
-
 static void cpu_copy_el2regs(const struct arm64_cpu_capabilities *__unused)
 {
 	/*
@@ -1046,7 +1048,7 @@ static void cpu_copy_el2regs(const struct arm64_cpu_capabilities *__unused)
 	if (!alternatives_applied)
 		write_sysreg(read_sysreg(tpidr_el1), tpidr_el2);
 }
-#endif
+#endif	/* CONFIG_ARM64_VHE */
 
 #ifdef CONFIG_ARM64_SSBD
 static int ssbs_emulation_handler(struct pt_regs *regs, u32 instr)
@@ -1088,6 +1090,7 @@ static void cpu_enable_ssbs(const struct arm64_cpu_capabilities *__unused)
 		arm64_set_ssbd_mitigation(true);
 	}
 }
+
 #endif /* CONFIG_ARM64_SSBD */
 
 static void elf_hwcap_fixup(void)

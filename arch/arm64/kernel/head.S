@@ -353,7 +353,6 @@ __primary_switched:
 	sub	x2, x2, x0
 	bl	__pi_memset
 	dsb	ishst				// Make zero page visible to PTW
-
 #ifdef CONFIG_KASAN
 	bl	kasan_early_init
 #endif
